@@ -251,11 +251,11 @@ defmodule Riak.Ecto.NormalizedQuery do
   do: {field(expr, pk, query, "order clause"), -1}
 
   defp check_query(query) do
-    check(query.distinct, nil, query, "MongoDB adapter does not support distinct clauses")
-    check(query.lock,     nil, query, "MongoDB adapter does not support locking")
-    check(query.joins,     [], query, "MongoDB adapter does not support join clauses")
-    check(query.group_bys, [], query, "MongoDB adapter does not support group_by clauses")
-    check(query.havings,   [], query, "MongoDB adapter does not support having clauses")
+    check(query.distinct, nil, query, "Riak adapter does not support distinct clauses")
+    check(query.lock,     nil, query, "Riak adapter does not support locking")
+    check(query.joins,     [], query, "Riak adapter does not support join clauses")
+    check(query.group_bys, [], query, "Riak adapter does not support group_by clauses")
+    check(query.havings,   [], query, "Riak adapter does not support having clauses")
   end
 
   defp check(expr, expr, _, _),
@@ -320,12 +320,12 @@ defmodule Riak.Ecto.NormalizedQuery do
   @binary_ops Keyword.keys(binary_ops)
   @bool_ops Keyword.keys(bool_ops)
 
-  Enum.map(binary_ops, fn {op, mongo_op} ->
-    defp binary_op(unquote(op)), do: unquote(mongo_op)
+  Enum.map(binary_ops, fn {op, riak_top} ->
+    defp binary_op(unquote(op)), do: unquote(riak_top)
   end)
 
-  Enum.map(bool_ops, fn {op, mongo_op} ->
-    defp bool_op(unquote(op)), do: unquote(mongo_op)
+  Enum.map(bool_ops, fn {op, riak_top} ->
+    defp bool_op(unquote(op)), do: unquote(riak_top)
   end)
 
   defp mapped_pair_or_value({op, _, _} = tuple, params, pk, query, place) when is_op(op) do
@@ -409,9 +409,9 @@ defmodule Riak.Ecto.NormalizedQuery do
 
   defp error(query, place) do
     raise Ecto.QueryError, query: query,
-    message: "1) Invalid expression for MongoDB adapter in #{place}"
+    message: "1) Invalid expression for Riak adapter in #{place}"
   end
   defp error(place) do
-    raise ArgumentError, "2) Invalid expression for MongoDB adapter in #{place}"
+    raise ArgumentError, "2) Invalid expression for Riak adapter in #{place}"
   end
 end

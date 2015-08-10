@@ -101,10 +101,8 @@ defmodule Riak.Ecto do
           Connection.all(repo.__riak_pool__, read, opts)
         |> Enum.map_reduce(0, &{process_document(&1, read, preprocess), &2 + 1})
         {count, rows}
-#      %CountQuery{} = count ->
-#        {1, [[Connection.count(repo.__mongo_pool__, count, opts)]]}
       %WriteQuery{} = write ->
-        result = apply(Connection, function, [repo.__mongo_pool__, write, opts])
+        result = apply(Connection, function, [repo.__riak_pool__, write, opts])
         {result, nil}
     end
   end
