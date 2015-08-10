@@ -21,7 +21,7 @@ Setup the bucket type and create a Solr Index
 ```
   $ export RIAK_HOST="http://127.0.0.1:8098"
   $ curl -XPUT "$RIAK_HOST/search/index/weather" -H'content-type:application/json' -d'{"schema":"_yz_default"}'
-  $ curl -XPUT $RIAK_HOST/types/pp_bitcask/buckets/weather/props -H 'Content-Type: application/json' -d '{"props":{"search_index":"weather"}}'
+  $ curl -XPUT $RIAK_HOST/types/ecto_simple/buckets/weather/props -H 'Content-Type: application/json' -d '{"props":{"search_index":"weather"}}'
 ```
 
 Inside IEx, run:
