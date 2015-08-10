@@ -1,0 +1,8 @@
+%{"connection": {:hex, :connection, "1.0.0-rc.1"},
+  "decimal": {:hex, :decimal, "1.1.0"},
+  "flaky": {:git, "git://github.com/pma/flaky.git", "8c28a1c51384f629d65172383877393962bbc503", []},
+  "meck": {:git, "git://github.com/basho/meck.git", "dde759050eff19a1a80fd854d7375174b191665d", [tag: "0.8.2"]},
+  "poolboy": {:hex, :poolboy, "1.5.1"},
+  "protobuffs": {:git, "git://github.com/basho/erlang_protobuffs.git", "f88fc3c6881687432ddd5546b3c7b08009dfb26f", [tag: "0.8.1p5"]},
+  "riak_pb": {:git, "git://github.com/basho/riak_pb", "620bc7001dc788e5530078aa8be53c9d15d4fdb4", [tag: "2.1.0.2"]},
+  "riakc": {:git, "git://github.com/basho/riak-erlang-client.git", "1c75e31fd50e065aeebe787d608ce9b7ddeddb38", []}}
