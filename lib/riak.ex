@@ -1,5 +1,4 @@
 defmodule Riak do
-  require Logger
   alias Riak.Pool
   alias Riak.Connection
 
@@ -8,18 +7,26 @@ defmodule Riak do
       case Connection.fetch_type(pid, bucket, id) do
         {:ok, map}                  -> {:ok, map}
         {:error, {:notfound, :map}} -> {:error, :not_found}
-        {:error, :disconnected}     -> {:error, :disconnected}
         {:error, reason}            -> {:error, reason}
       end
     end)
   end
 
   def update_type(pool, bucket, id, update) do
-    Logger.debug "UPDATE CMD = #{inspect(update)}"
     Pool.run_with_log(pool, :update_type, [bucket, id], [], fn pid ->
       case Connection.update_type(pid, bucket, id, update) do
-        :ok       -> :ok
-        {:ok, id} -> {:ok, id}
+        :ok              -> :ok
+        {:ok, id}        -> {:ok, id}
+        {:error, reason} -> {:error, reason}
+      end
+    end)
+  end
+
+  def delete(pool, bucket, id) do
+    Pool.run_with_log(pool, :delete_one, [bucket, id], [], fn pid ->
+      case Connection.delete(pid, bucket, id) do
+        :ok              -> :ok
+        {:error, reason} -> {:error, reason}
       end
     end)
   end
@@ -31,7 +38,7 @@ defmodule Riak do
     Pool.run_with_log(pool, :search, [index, query], [], fn pid ->
       case Connection.search(pid, index, query, search_options(opts)) do
         {:ok, {:search_results, results, _score, _total_count}} ->
-          {:ok, results}
+        {:ok, results}
       end
     end)
   end
@@ -49,5 +56,4 @@ defmodule Riak do
     |> Enum.reject(fn {_key, value} -> is_nil(value) end)
     |> Enum.into(%{})
   end
-
 end

@@ -1,15 +1,13 @@
 defmodule Riak.Ecto.Encoder do
   @moduledoc false
 
-  require Logger
-
   import Riak.Ecto.Utils
   alias Ecto.Query.Tagged
 
   def encode(doc, params, pk) when is_keyword(doc),
     do: document(doc, params, pk)
   def encode(list, params, pk) when is_list(list),
-    do: map(list, &encode(&1, params, pk))
+    do: map_list(list, &encode(&1, params, pk))
   def encode({:^, _, [idx]}, params, pk),
     do: elem(params, idx) |> encode(params, pk)
   def encode(%Tagged{value: value, type: type}, params, _pk),
@@ -23,20 +21,24 @@ defmodule Riak.Ecto.Encoder do
 
   def encode(doc, pk) when is_keyword(doc),
     do: document(doc, pk)
-  def encode(int, _pk) when is_integer(int),
-    do: {:ok, int}
-  def encode(float, _pk) when is_float(float),
-    do: {:ok, float}
   def encode(string, _pk) when is_binary(string),
     do: {:ok, string}
   def encode(boolean, _pk) when is_boolean(boolean),
     do: {:ok, boolean}
-  def encode(atom, _pk) when is_atom(atom),
-    do: {:ok, atom}
+  def encode(nil, _pk) do
+    {:ok, nil}
+  end
   def encode(list, pk) when is_list(list),
-    do: map(list, &encode(&1, pk))
+    do: map_list(list, &encode(&1, pk))
   def encode(%Tagged{value: value, type: type}, _pk),
     do: {:ok, typed_value(value, type)}
+  def encode(%{__struct__: change, field: field, value: value}, pk)
+  when change in [Riak.Ecto.ChangeMap, Riak.Ecto.ChangeArray] do
+    case encode(value, pk) do
+      {:ok, value} -> {:ok, {field, value}}
+      :error       -> :error
+    end
+  end
   def encode(%{__struct__: _}, _pk),
     do: :error # Other structs are not supported
   def encode(map, pk) when is_map(map),
@@ -76,8 +78,15 @@ defmodule Riak.Ecto.Encoder do
   defp typed_value(value, type, _params),
     do: typed_value(value, type)
 
-  defp typed_value(nil, _),
-    do: nil
+  defp typed_value(nil, type) when type in [:string, :integer, :float, :datetime, :date],
+    do: {:register, nil}
+  defp typed_value(nil, type) when type in [:boolean],
+    do: {:flag, nil}
+  defp typed_value(nil, {:embed, %Ecto.Embedded{cardinality: :one}}),
+    do: {:map, nil}
+  defp typed_value(nil, type) when type in [:map],
+    do: {:map, nil}
+
   defp typed_value(value, :any),
     do: value
   defp typed_value(value, {:array, type}),
@@ -91,6 +100,23 @@ defmodule Riak.Ecto.Encoder do
 
   defp map(list, fun) do
     return =
+      Enum.reduce(list, {%{}, :ok}, fn
+        elem, {acc, :ok} ->
+          case fun.(elem) do
+            {:ok, {k, v}} -> {Map.put(acc, k, v), :ok}
+            :error        -> {:halt, :error}
+          end
+        _, {:halt, :error} -> {:halt, :error}
+      end)
+
+    case return do
+      {values,  :ok}    -> {:ok, values}
+      {_values, :error} -> :error
+    end
+  end
+
+  defp map_list(list, fun) do
+    return =
       Enum.flat_map_reduce(list, :ok, fn elem, :ok ->
         case fun.(elem) do
           {:ok, value} -> {[value], :ok}
@@ -103,4 +129,5 @@ defmodule Riak.Ecto.Encoder do
       {_values, :error} -> :error
     end
   end
+
 end

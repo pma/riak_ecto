@@ -14,6 +14,6 @@ defmodule Simple.Mixfile do
 
   defp deps do
     [{:riak_ecto, path: "../.."},
-     {:ecto, path: "../../deps/ecto", override: true}]
+     {:ecto, path: "../../deps/ecto/", override: true}]
   end
 end

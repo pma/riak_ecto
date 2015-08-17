@@ -7,13 +7,16 @@ defmodule Riak.Ecto.NormalizedQuery do
     @moduledoc false
 
     defstruct coll: nil, pk: nil, params: {}, query: %{},
-    projection: %{}, fields: [], fl: nil, opts: []
+              filter: "",
+              projection: %{}, fields: [], fl: nil, opts: []
   end
 
   defmodule WriteQuery do
     @moduledoc false
 
-    defstruct coll: nil, query: %{}, command: %{}, opts: []
+    defstruct coll: nil, query: %{}, command: %{},
+              filter: "",
+              model: nil, context: nil, opts: []
   end
 
   defmodule CommandQuery do
@@ -34,7 +37,7 @@ defmodule Riak.Ecto.NormalizedQuery do
 
   def all(%Query{} = original, params) do
     check_query(original)
-
+Logger.debug "ORIGINGAL = #{inspect(original)}"
     from   = from(original)
     params = List.to_tuple(params)
     query  = query_order(original, params, from)
@@ -43,15 +46,17 @@ defmodule Riak.Ecto.NormalizedQuery do
       :count ->
         count(original, query, from)
       {projection, fields} ->
+        Logger.debug "PROJECTION: #{inspect(projection)}  ::  FIELDS #{inspect(fields)}"
         find_all(original, query, projection, fields, params, from)
     end
   end
 
   defp find_all(original, query, projection, fields, params, {coll, _, pk}) do
     opts   = opts(:find_all, original)
-
+    filter = to_solr_query(query) |> IO.iodata_to_binary
+    Logger.debug ("QUERY: #{inspect(query)}  ::  FILTER: #{inspect(filter)}")
     %ReadQuery{coll: coll, pk: pk, params: params, query: query, projection: projection,
-               fields: fields, opts: opts}
+               fields: fields, opts: opts, filter: filter}
   end
 
   defp count(original, query, {coll, _, _}) do
@@ -63,20 +68,20 @@ defmodule Riak.Ecto.NormalizedQuery do
     %CommandQuery{command: command, opts: opts(:command)}
   end
 
-  def update({_prefix, coll, _model}, values, filter, pk) do
+  def update(%{source: {_prefix, coll}, model: model, context: context}, values, filter, pk) do
     command = command(:update, values, pk)
     query   = query(filter, pk)
 
-    %WriteQuery{coll: coll, query: query, command: command}
+    %WriteQuery{coll: coll, query: query, command: command, context: context, model: model}
   end
 
-  def delete({_prefix, coll, _model}, filter, pk) do
+  def delete({_prefix, coll}, context, filter, pk) do
     query = query(filter, pk)
 
-    %WriteQuery{coll: coll, query: query}
+    %WriteQuery{coll: coll, query: query, context: context}
   end
 
-  def insert({_prefix, coll, model}, document, pk) do
+  def insert(%{context: _context, model: model, source: {_prefix, coll}}, document, pk) do
     command = command(:insert, document, model.__struct__(), pk)
 
     %WriteQuery{coll: coll, command: command}
@@ -132,6 +137,7 @@ defmodule Riak.Ecto.NormalizedQuery do
   # Keyword and interpolated fragments
   defp projection([{:fragment, _, [args]} = field | rest], params, from, query, pacc, facc)
   when is_list(args) or tuple_size(args) == 3 do
+    Logger.debug "PROJECTION FRAGMENT 1"
     {_, _, pk} = from
     pacc =
       args
@@ -173,15 +179,15 @@ defmodule Riak.Ecto.NormalizedQuery do
     do: []
 
   defp put_if_not_zero(keyword, _key, 0),
-  do: keyword
+    do: keyword
   defp put_if_not_zero(keyword, key, value),
-  do: Keyword.put(keyword, key, value)
+    do: Keyword.put(keyword, key, value)
 
   defp start(%Query{offset: offset}), do: offset_limit(offset)
 
   defp rows(%Query{limit: limit}), do: offset_limit(limit)
 
-  # defp coll({coll, _model, _pk}), do: coll
+  defp coll({coll, _model, _pk}), do: coll
 
   defp query(%Query{wheres: wheres} = query, params, {_coll, _model, pk}) do
     wheres
@@ -216,22 +222,27 @@ defmodule Riak.Ecto.NormalizedQuery do
   end
 
   defp command(:insert, document, struct, pk) do
+    Logger.debug "INSERT #{inspect(document)} :: #{inspect(struct)}"
     document
     |> Enum.reject(fn {key, value} -> both_nil(value, Map.get(struct, key)) end)
     |> value(pk, "insert command") |> map_unless_empty
   end
 
   defp command(:update, values, pk) do
+    Logger.debug("UPDATE VALUES #{inspect(values)}")
     [set: values |> value(pk, "update command") |> map_unless_empty]
   end
 
   defp both_nil(nil, nil), do: true
+  defp both_nil( %Ecto.Query.Tagged{tag: nil, value: nil}, nil), do: true
+  defp both_nil([], []), do: true
+  defp both_nil(false, _), do: true
   defp both_nil(_, _), do: false
 
   defp offset_limit(nil),
-  do: nil
+    do: nil
   defp offset_limit(%Query.QueryExpr{expr: int}) when is_integer(int),
-  do: int
+    do: int
 
   defp primary_key(nil),
     do: nil
@@ -246,9 +257,9 @@ defmodule Riak.Ecto.NormalizedQuery do
   end
 
   defp order_by_expr({:asc,  expr}, pk, query),
-  do: {field(expr, pk, query, "order clause"),  1}
+    do: {field(expr, pk, query, "order clause"),  1}
   defp order_by_expr({:desc, expr}, pk, query),
-  do: {field(expr, pk, query, "order clause"), -1}
+    do: {field(expr, pk, query, "order clause"), -1}
 
   defp check_query(query) do
     check(query.distinct, nil, query, "Riak adapter does not support distinct clauses")
@@ -259,21 +270,25 @@ defmodule Riak.Ecto.NormalizedQuery do
   end
 
   defp check(expr, expr, _, _),
-  do: nil
+    do: nil
   defp check(_, _, query, message),
-  do: raise(Ecto.QueryError, query: query, message: message)
+    do: raise(Ecto.QueryError, query: query, message: message)
 
   defp value(expr, pk, place) do
     case Encoder.encode(expr, pk) do
       {:ok, value} -> value
-      :error       -> error(place)
+      :error       ->
+        Logger.error "==> ENCODE ERROR #{inspect({expr})}"
+        error(place)
     end
   end
 
   defp value(expr, params, pk, query, place) do
     case Encoder.encode(expr, params, pk) do
       {:ok, value} -> value
-      :error       ->       error(query, place)
+      :error       ->
+        Logger.error "==> ENCODE ERROR #{inspect({expr, params})}"
+        error(query, place)
     end
   end
 
@@ -292,7 +307,7 @@ defmodule Riak.Ecto.NormalizedQuery do
   defp riak_type(:id),        do: :register
   defp riak_type(_),          do: :register
 
-  defp map_unless_empty([]), do: %{}
+  defp map_unless_empty([]),   do: %{}
   defp map_unless_empty(list), do: list
 
   defp merge_keys(keyword, query, place) do
@@ -313,9 +328,9 @@ defmodule Riak.Ecto.NormalizedQuery do
   def update_op(_, query), do: error(query, "update clause")
 
   binary_ops =
-    [>: :"$gt", >=: :"$gte", <: :"$lt", <=: :"$lte", !=: :"$ne", in: :"$in"]
+    [>: :gt, >=: :gte, <: :lt, <=: :lte, !=: :ne, in: :in]
   bool_ops =
-    [and: :"$and", or: :"$or"]
+    [and: :and, or: :or]
 
   @binary_ops Keyword.keys(binary_ops)
   @bool_ops Keyword.keys(bool_ops)
@@ -374,13 +389,14 @@ defmodule Riak.Ecto.NormalizedQuery do
     {field(expr, pk, query, place), ["$ne": nil]}
   end
   defp pair({:not, _, [{:==, _, [left, right]}]}, params, pk, query, place) do
-    {field(left, pk, query, place), ["$ne": value(right, params, pk, query, place)]}
+    {field(left, pk, query, place), [ne: value(right, params, pk, query, place)]}
   end
   defp pair({:not, _, [expr]}, params, pk, query, place) do
     {:"$not", [pair(expr, params, pk, query, place)]}
   end
   # Keyword or embedded fragment
-  defp pair({:fragment, _, [args]}, params, pk, query, place) do
+  defp pair({:fragment, _, args}, params, pk, query, place) do
+    Logger.debug "FRAGMENT #{inspect({:fragment, args, params, pk, query})}"
   #when is_list(args) or tuple_size(args) == 3 do
     value(args, params, pk, query, place)
   end
@@ -389,29 +405,69 @@ defmodule Riak.Ecto.NormalizedQuery do
     {:id, ["$exists": bool]}
   end
 
-#  defp pair({:fragment, _, [kw]}, _sources, query) when is_list(kw) or tuple_size(kw) == 3 do
-#    error(query, "PostgreSQL adapter does not support keyword or interpolated fragments")
-#  end
-
-  defp pair({:fragment, _, args}, params, pk, query, place) do
-    r = Enum.map_join(args, "", fn
-      {:raw, arg}   -> arg
-      {:expr, expr} -> pair(expr, params, pk, query, place)
-    end)
-    {:raw, r}
+  # Keyword or embedded fragment
+  defp pair({:fragment, _, [args]}, params, pk, query, place)
+  when is_list(args) or tuple_size(args) == 3 do
+    value(args, params, pk, query, place)
   end
-#  defp pair({:fragment, _, args}, params, pk, query, place) do
-#    value(args, params, pk, query, place)
-#  end
+
   defp pair(_expr, _params, _pk, query, place) do
+    Logger.error "INVALID PAIR #{inspect({_expr, _params, _pk, query, place})}"
     error(query, place)
   end
 
   defp error(query, place) do
     raise Ecto.QueryError, query: query,
-    message: "1) Invalid expression for Riak adapter in #{place}"
+      message: "1) Invalid expression for Riak adapter in #{place}"
   end
   defp error(place) do
     raise ArgumentError, "2) Invalid expression for Riak adapter in #{place}"
   end
+
+
+  # Solr query
+  def to_solr_query(%{:ne => expr}) do
+    ['-', '(', to_solr_query(expr), ')' ]
+  end
+
+  def to_solr_query([{field, [gt: value]}]) when is_binary(value) do
+    ['(', to_string(field), '_register', ':', '{', to_string(value), ' TO *]', ')' ]
+  end
+
+  def to_solr_query([{field, [gte: value]}]) when is_binary(value) do
+    ['(', to_string(field), '_register', ':', '[', to_string(value), ' TO *]', ')' ]
+  end
+
+  def to_solr_query(%{:and => [left, right]}) do
+    ['(', to_solr_query(left), ')', ' AND ', '(', to_solr_query(right), ')' ]
+  end
+
+  def to_solr_query(%{:or => [left, right]}) do
+    ['(', to_solr_query(left), ')', ' OR ', '(', to_solr_query(right), ')' ]
+  end
+
+#  def to_solr_query(%{raw: expr}) do
+#    expr
+#  end
+
+  def to_solr_query([{field, value}]) when is_binary(value) do
+    [to_string(field), '_register', ':', value]
+  end
+
+  def to_solr_query([{field, true}]) do
+    [to_string(field), '_flag', ':', 'true']
+  end
+
+  def to_solr_query([{field, false}]) do
+    ['-', to_string(field), '_flag', ':', 'true']
+  end
+
+  def to_solr_query(%{} = map) do
+    to_solr_query(Enum.into(map, []))
+  end
+
+#  def to_solr_query([]) do
+#    '*:*'
+#  end
+
 end

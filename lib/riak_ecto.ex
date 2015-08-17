@@ -1,5 +1,4 @@
 defmodule Riak.Ecto do
-  require Logger
 
   @moduledoc """
   Adapter module for Riak, using a map bucket_type to store models.
@@ -68,6 +67,19 @@ defmodule Riak.Ecto do
     do: Ecto.Type.load(:float, String.to_float(data), &load/2)
   def load(:integer, data) when is_binary(data),
     do: Ecto.Type.load(:integer, String.to_integer(data), &load/2)
+
+  def load({:embed, %Ecto.Embedded{cardinality: :many}} = type, nil),
+    do: Ecto.Type.load(type, nil, &load/2)
+
+  def load({:embed, %Ecto.Embedded{cardinality: :many}} = type, data) do
+    data = Enum.reduce(data, [], fn {k, v}, acc ->
+      [Map.put(v, "id", k) | acc]
+    end)
+    data = Enum.sort(data, &(&1["order"] <= &2["order"]))
+
+    Ecto.Type.load(type, data, &load/2)
+  end
+
   def load(type, data),
     do: Ecto.Type.load(type, data, &load/2)
 
@@ -79,9 +91,9 @@ defmodule Riak.Ecto do
   def dump(:integer, data) when is_integer(data),
     do: Ecto.Type.dump(:string, String.Chars.Integer.to_string(data), &dump/2)
   def dump(Ecto.Date, %Ecto.DateTime{} = data),
-    do: Ecto.Type.dump(Ecto.DateTime, Ecto.DateTime.to_iso8601(data), &dump/2)
+    do: Ecto.Type.dump(:string, Ecto.DateTime.to_iso8601(data), &dump/2)
   def dump(Ecto.Date, %Ecto.Date{} = data),
-    do: Ecto.Type.dump(Ecto.Date, Ecto.Date.to_iso8601(data), &dump/2)
+    do: Ecto.Type.dump(:string, Ecto.Date.to_iso8601(data), &dump/2)
   def dump(type, data),
     do: Ecto.Type.dump(type, data, &dump/2)
 
@@ -94,12 +106,20 @@ defmodule Riak.Ecto do
   end
 
   @doc false
+  def execute(_repo, _meta, {:update_all, _query}, _params, _preprocess, _opts) do
+    raise ArgumentError, "Riak adapter does not support update_all."
+  end
+
+  def execute(_repo, _meta, {:delete_all, _query}, _params, _preprocess, _opts) do
+    raise ArgumentError, "Riak adapter does not support delete_all."
+  end
+
   def execute(repo, _meta, {function, query}, params, preprocess, opts) do
     case apply(NormalizedQuery, function, [query, params]) do
       %ReadQuery{} = read ->
         {rows, count} =
           Connection.all(repo.__riak_pool__, read, opts)
-        |> Enum.map_reduce(0, &{process_document(&1, read, preprocess), &2 + 1})
+          |> Enum.map_reduce(0, &{process_document(&1, read, preprocess), &2 + 1})
         {count, rows}
       %WriteQuery{} = write ->
         result = apply(Connection, function, [repo.__riak_pool__, write, opts])
@@ -108,78 +128,93 @@ defmodule Riak.Ecto do
   end
 
   @doc false
-  def insert(_repo, source, _params, {key, :id, _}, _returning, _opts) do
-    raise ArgumentError, "Riak adapter does not support :id field type in models. " <>
-      "The #{inspect key} field in #{inspect source} is tagged as such."
-  end
-
-  def insert(_repo, source, _params, _autogen, [_] = returning, _opts) do
+  def insert(_repo, meta, _params, {key, :id, _}, _returning, _opts) do
     raise ArgumentError,
-    "Riak adapter does not support :read_after_writes in models. " <>
-      "The following fields in #{inspect source} are tagged as such: #{inspect returning}"
+      "Riak adapter does not support :id field type in models. " <>
+      "The #{inspect key} field in #{inspect meta.model} is tagged as such."
   end
 
-  def insert(repo, source, params, nil, [], opts) do
-    normalized = NormalizedQuery.insert(source, params, nil)
-
-    {:ok, _} = Connection.insert(repo.__riak_pool__, normalized, opts)
-    {:ok, []}
+  def insert(_repo, meta, _params, _autogen, [_] = returning, _opts) do
+    raise ArgumentError,
+      "Riak adapter does not support :read_after_writes in models. " <>
+      "The following fields in #{inspect meta.model} are tagged as such: #{inspect returning}"
   end
 
-  def insert(repo, source, params, {pk, :binary_id, nil}, [], opts) do
-    normalized = NormalizedQuery.insert(source, params, pk)
+  def insert(repo, meta, params, nil, [], opts) do
+    normalized = NormalizedQuery.insert(meta, params, nil)
 
-    {:ok, %{inserted_id: value}} =
-      Connection.insert(repo.__riak_pool__, normalized, opts)
-    {:ok, [{pk, value}]}
+    case Connection.insert(repo.__riak_pool__, normalized, opts) do
+      {:ok, _} -> {:ok, []}
+      other    -> other
+    end
   end
 
-  def insert(repo, source, params, {pk, :binary_id, _value}, [], opts) do
-    normalized = NormalizedQuery.insert(source, params, pk)
+  def insert(repo, meta, params, {pk, :binary_id, nil}, [], opts) do
+    normalized = NormalizedQuery.insert(meta, params, pk)
 
-    {:ok, _} = Connection.insert(repo.__riak_pool__, normalized, opts)
-    {:ok, []}
+    case Connection.insert(repo.__riak_pool__, normalized, opts) do
+      {:ok, %{inserted_id: value}} -> {:ok, [{pk, value}]}
+      other -> other
+    end
+  end
+
+  def insert(repo, meta, params, {pk, :binary_id, _value}, [], opts) do
+    normalized = NormalizedQuery.insert(meta, params, pk)
+
+    case Connection.insert(repo.__riak_pool__, normalized, opts) do
+      {:ok, _} -> {:ok, []}
+      other    -> other
+    end
   end
 
   @doc false
-  def update(_repo, source, _fields, _filter, {key, :id, _}, _returning, _opts) do
-    raise ArgumentError, "Riak adapter does not support :id field type in models. " <>
-      "The #{inspect key} field in #{inspect source} is tagged as such."
-  end
-
-  def update(_repo, source, _fields, _filter, _autogen, [_|_] = returning, _opts) do
+  def update(_repo, meta, _fields, _filter, {key, :id, _}, _returning, _opts) do
     raise ArgumentError,
-    "Riak adapter does not support :read_after_writes in models. " <>
-      "The following fields in #{inspect source} are tagged as such: #{inspect returning}"
+      "Riak adapter does not support :id field type in models. " <>
+      "The #{inspect key} field in #{inspect meta.model} is tagged as such."
   end
 
-  def update(repo, source, fields, filter, {pk, :binary_id, _value}, [], opts) do
-    normalized = NormalizedQuery.update(source, fields, filter, pk)
+  def update(_repo, meta, _fields, _filter, _autogen, [_|_] = returning, _opts) do
+    raise ArgumentError,
+      "Riak adapter does not support :read_after_writes in models. " <>
+      "The following fields in #{inspect meta.model} are tagged as such: #{inspect returning}"
+  end
+
+  def update(_repo, %{context: nil} = meta, _fields, _filter, _, _, _opts) do
+    raise ArgumentError,
+      "No causal context in #{inspect meta.model}. " <>
+      "Get the model by id before trying to update it."
+  end
+
+  def update(repo, meta, fields, filter, {pk, :binary_id, _value}, [], opts) do
+    normalized = NormalizedQuery.update(meta, fields, filter, pk)
 
     Connection.update(repo.__riak_pool__, normalized, opts)
   end
 
   @doc false
-  def delete(_repo, source, _filter, {key, :id, _}, _opts) do
-    raise ArgumentError, "Riak adapter does not support :id field type in models. " <>
-      "The #{inspect key} field in #{inspect source} is tagged as such."
+  def delete(_repo, meta, _filter, {key, :id, _}, _opts) do
+    raise ArgumentError,
+      "Riak adapter does not support :id field type in models. " <>
+      "The #{inspect key} field in #{inspect meta.model} is tagged as such."
   end
 
-  def delete(repo, source, filter, {pk, :binary_id, _value}, opts) do
-    normalized = NormalizedQuery.delete(source, filter, pk)
+  def delete(repo, meta, filter, {pk, :binary_id, _value}, opts) do
+    normalized = NormalizedQuery.delete(meta.source, meta.context, filter, pk)
 
     Connection.delete(repo.__riak_pool__, normalized, opts)
   end
 
   defp process_document(document, %{fields: fields, pk: pk}, preprocess) do
     document = Decoder.decode_document(document, pk)
+
     Enum.map(fields, fn
       {:field, name, field} ->
-        preprocess.(field, Map.get(document, Atom.to_string(name)))
+        preprocess.(field, Map.get(document, Atom.to_string(name)), document[:context])
       {:value, value, field} ->
-        preprocess.(field, Decoder.decode_value(value, pk))
+        preprocess.(field, Decoder.decode_value(value, pk), document[:context])
       field ->
-        preprocess.(field, document)
+        preprocess.(field, document, document[:context])
     end)
   end
 
@@ -206,45 +241,12 @@ defmodule Riak.Ecto do
   defp format_log(_entry, :search, [index, query, _opts]) do
     ["SEARCH", format_part("index", index), format_part("query", query)]
   end
-  defp format_log(_entry, :insert_one, [coll, doc, _opts]) do
-    ["INSERT", format_part("coll", coll), format_part("document", doc)]
-  end
-  defp format_log(_entry, :insert_many, [coll, docs, _opts]) do
-    ["INSERT", format_part("coll", coll), format_part("documents", docs)]
-  end
-  defp format_log(_entry, :delete_one, [coll, filter, _opts]) do
+  defp format_log(_entry, :delete, [coll, filter, _opts]) do
     ["DELETE", format_part("coll", coll), format_part("filter", filter),
      format_part("many", false)]
-  end
-  defp format_log(_entry, :delete_many, [coll, filter, _opts]) do
-    ["DELETE", format_part("coll", coll), format_part("filter", filter),
-     format_part("many", true)]
-  end
-  defp format_log(_entry, :replace_one, [coll, filter, doc, _opts]) do
-    ["REPLACE", format_part("coll", coll), format_part("filter", filter),
-     format_part("document", doc)]
-  end
-  defp format_log(_entry, :update_one, [coll, filter, update, _opts]) do
-    ["UPDATE", format_part("coll", coll), format_part("filter", filter),
-     format_part("update", update), format_part("many", false)]
-  end
-  defp format_log(_entry, :update_many, [coll, filter, update, _opts]) do
-    ["UPDATE", format_part("coll", coll), format_part("filter", filter),
-     format_part("update", update), format_part("many", true)]
-  end
-  defp format_log(_entry, :find_cursor, [coll, query, projection, _opts]) do
-    ["FIND", format_part("coll", coll), format_part("query", query),
-     format_part("projection", projection)]
-  end
-  defp format_log(_entry, :find_batch, [coll, cursor, _opts]) do
-    ["GET_MORE", format_part("coll", coll), format_part("cursor_id", cursor)]
-  end
-  defp format_log(_entry, :kill_cursors, [cursors, _opts]) do
-    ["KILL_CURSORS", format_part("cursor_ids", cursors)]
   end
 
   defp format_part(name, value) do
     [" ", name, "=" | inspect(value)]
   end
-
 end

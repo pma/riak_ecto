@@ -24,23 +24,24 @@ defmodule Weather do
     field :city, :string
     field :temp_lo, :integer
     field :temp_hi, :integer
+    field :expiry_date, Ecto.Date
     field :active, :boolean
     field :prcp, :float, default: 0.0
     field :map, :map
-    timestamps
 
     embeds_one :item, Item
+    embeds_many :items, Item
 
+    timestamps
   end
 end
 
 defmodule Item do
   use Ecto.Model
 
-  # A required field for all embedded documents
-  @primary_key {:id, :binary_id, autogenerate: true}
-  schema "" do
+  embedded_schema do
     field :name
+    field :order, :integer
   end
 end
 

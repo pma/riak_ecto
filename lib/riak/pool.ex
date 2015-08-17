@@ -1,12 +1,12 @@
 defmodule Riak.Pool do
   @moduledoc """
-  Defines a pool of MongoDB connections.
+  Defines a pool of Riak connections.
 
   A pool can be defined as:
 
       defmodule MyPool do
         use Riak.Pool,
-          adapter: riak.Pool.Poolboy,
+          adapter: Tiak.Pool.Poolboy,
           hostname: "localhost"
        end
 

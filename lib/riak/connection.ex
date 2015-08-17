@@ -17,32 +17,21 @@ defmodule Riak.Connection do
 
   @doc false
   def init(opts) do
-    :random.seed(:os.timestamp)
-    timeout = opts[:timeout] || 5000
+    timeout = opts[:timeout] || 5_000
+    heartbeat = opts[:heartbeat] || 10_000
     bucket_type = opts[:bucket_type]
 
     opts = opts
     |> Keyword.put_new(:hostname, "localhost")
     |> Keyword.update!(:hostname, &to_char_list/1)
     |> Keyword.put_new(:port, 8087)
-    |> Keyword.put_new(:backoff, 1000)
     |> Keyword.delete(:timeout)
     |> Keyword.delete(:bucket_type)
 
-    s = %{pid: nil, opts: opts, bucket_type: bucket_type,
-          timeout: timeout}
+    send(self(), :connect)
 
-    host = opts[:hostname]
-    port = opts[:port]
-    {:ok, pid} = :riakc_pb_socket.start_link(host, port, [queue_if_disconnected: false, auto_reconnect: true, keepalive: true])
-
-    s = %{s | pid: pid}
-
-    {:ok, s}
-  end
-
-  def disconnect(:close, s) do
-    {:stop, :normal, s}
+    {:ok, %{pid: nil, opts: opts, bucket_type: bucket_type,
+            timeout: timeout, heartbeat: heartbeat}}
   end
 
   def fetch_type(pid, bucket, id) do
@@ -55,6 +44,10 @@ defmodule Riak.Connection do
 
   def search(pid, index, query, opts) do
     GenServer.call(pid, {:search, index, query, opts})
+  end
+
+  def delete(pid, bucket, id) do
+    GenServer.call(pid, {:delete, bucket, id})
   end
 
   def handle_call({:fetch_type, bucket, id}, _from, s) do
@@ -71,6 +64,13 @@ defmodule Riak.Connection do
     end
   end
 
+  def handle_call({:delete, bucket, id}, _from, s) do
+    case :riakc_pb_socket.delete(s.pid, {s.bucket_type, bucket}, id) do
+      :ok              -> {:reply, :ok, s}
+      {:error, reason} -> {:reply, {:error, reason}, s}
+    end
+  end
+
   def handle_call({:search, index, query, opts}, _from, s) do
     case :riakc_pb_socket.search(s.pid, index, query, opts) do
       {:ok, {:search_results, _docs, _max_score, _num_found} = search_results} ->
@@ -80,13 +80,37 @@ defmodule Riak.Connection do
     end
   end
 
-  @doc false
-  def handle_cast(:stop, s) do
-    {:disconnect, :close, s}
+  def handle_info(:connect, %{opts: opts} = s) do
+    host = opts[:hostname]
+    port = opts[:port]
+    {:ok, pid} = :riakc_pb_socket.start_link(host, port,
+                                             [queue_if_disconnected: true,
+                                              auto_reconnect: true, keepalive: true])
+
+    :timer.send_after(s.heartbeat, self(), :heartbeat)
+
+    {:noreply, %{s | pid: pid}}
+  end
+
+  def handle_info(:heartbeat, s) do
+    case :riakc_pb_socket.is_connected(s.pid, s.timeout) do
+      true ->
+        case :riakc_pb_socket.ping(s.pid, s.timeout) do
+          :pong ->
+            :timer.send_after(s.heartbeat, self(), :heartbeat)
+            {:noreply, s}
+          {:error, _reason} ->
+            :ok = :riakc_pb_socket.stop(s.pid)
+            :timer.send_after(s.timeout, self(), :connect)
+            {:noreply, s}
+        end
+      {false, _} ->
+        :timer.send_after(s.heartbeat, self(), :heartbeat)
+        {:noreply, s}
+    end
   end
 
   def terminate(_, s) do
     :riakc_pb_socket.stop(s.pid)
   end
-
 end
