@@ -29,6 +29,10 @@ defmodule Weather do
     field :prcp, :float, default: 0.0
     field :map, :map
 
+    field :counter, Riak.Ecto.Counter
+
+    field :list, {:array, :integer}
+
     embeds_one :item, Item
     embeds_many :items, Item
 

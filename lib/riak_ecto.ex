@@ -63,6 +63,18 @@ defmodule Riak.Ecto do
         :error
     end
   end
+  require Logger
+  def load(Riak.Ecto.Counter, data) do
+    Logger.debug "COUNTER = #{inspect(data)}"
+#    case Riak.Ecto.Counter.cast(data) do
+#      {:ok, data} ->
+#        Ecto.Type.load(Riak.Ecto.Counter, data, &load/2)
+#      :error ->
+#        :error
+    #    end
+    Ecto.Type.load(Riak.Ecto.Counter, data, &load/2)
+  end
+
   def load(:float, data) when is_binary(data),
     do: Ecto.Type.load(:float, String.to_float(data), &load/2)
   def load(:integer, data) when is_binary(data),
@@ -75,13 +87,24 @@ defmodule Riak.Ecto do
     data = Enum.reduce(data, [], fn {k, v}, acc ->
       [Map.put(v, "id", k) | acc]
     end)
-    data = Enum.sort(data, &(&1["order"] <= &2["order"]))
-
     Ecto.Type.load(type, data, &load/2)
   end
 
-  def load(type, data),
-    do: Ecto.Type.load(type, data, &load/2)
+  require Logger
+
+  def load({:array, _} = type, nil),
+    do: Ecto.Type.load(type, nil, &load/2)
+
+  def load({:array, _} = type, data) do
+    data = data
+    |> Enum.into([])
+    |> Enum.map(&elem(&1, 1))
+    Ecto.Type.load(type, data, &load/2)
+  end
+
+  def load(type, data) do
+    Ecto.Type.load(type, data, &load/2)
+  end
 
   @doc false
   def dump(:binary_id, data),
@@ -94,8 +117,10 @@ defmodule Riak.Ecto do
     do: Ecto.Type.dump(:string, Ecto.DateTime.to_iso8601(data), &dump/2)
   def dump(Ecto.Date, %Ecto.Date{} = data),
     do: Ecto.Type.dump(:string, Ecto.Date.to_iso8601(data), &dump/2)
-  def dump(type, data),
-    do: Ecto.Type.dump(type, data, &dump/2)
+  def dump(type, data) do
+    Logger.warn "DUMP #{inspect(type)} :: #{inspect(data)}"
+    Ecto.Type.dump(type, data, &dump/2)
+  end
 
   @doc false
   def embed_id(_), do: Flaky.alpha
@@ -185,10 +210,10 @@ defmodule Riak.Ecto do
       "No causal context in #{inspect meta.model}. " <>
       "Get the model by id before trying to update it."
   end
-
+require Logger
   def update(repo, meta, fields, filter, {pk, :binary_id, _value}, [], opts) do
     normalized = NormalizedQuery.update(meta, fields, filter, pk)
-
+Logger.debug "UPDATE FIELDS #{inspect(fields)}"
     Connection.update(repo.__riak_pool__, normalized, opts)
   end
 

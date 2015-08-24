@@ -84,7 +84,7 @@ defmodule Riak.Connection do
     host = opts[:hostname]
     port = opts[:port]
     {:ok, pid} = :riakc_pb_socket.start_link(host, port,
-                                             [queue_if_disconnected: true,
+                                             [queue_if_disconnected: false,
                                               auto_reconnect: true, keepalive: true])
 
     :timer.send_after(s.heartbeat, self(), :heartbeat)

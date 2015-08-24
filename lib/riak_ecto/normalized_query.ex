@@ -7,7 +7,7 @@ defmodule Riak.Ecto.NormalizedQuery do
     @moduledoc false
 
     defstruct coll: nil, pk: nil, params: {}, query: %{},
-              filter: "",
+              model: nil, filter: "",
               projection: %{}, fields: [], fl: nil, opts: []
   end
 
@@ -51,12 +51,12 @@ Logger.debug "ORIGINGAL = #{inspect(original)}"
     end
   end
 
-  defp find_all(original, query, projection, fields, params, {coll, _, pk}) do
+  defp find_all(original, query, projection, fields, params, {coll, model, pk}) do
     opts   = opts(:find_all, original)
     filter = to_solr_query(query) |> IO.iodata_to_binary
     Logger.debug ("QUERY: #{inspect(query)}  ::  FILTER: #{inspect(filter)}")
     %ReadQuery{coll: coll, pk: pk, params: params, query: query, projection: projection,
-               fields: fields, opts: opts, filter: filter}
+               fields: fields, opts: opts, filter: filter, model: model}
   end
 
   defp count(original, query, {coll, _, _}) do
@@ -187,7 +187,7 @@ Logger.debug "ORIGINGAL = #{inspect(original)}"
 
   defp rows(%Query{limit: limit}), do: offset_limit(limit)
 
-  defp coll({coll, _model, _pk}), do: coll
+  # defp coll({coll, _model, _pk}), do: coll
 
   defp query(%Query{wheres: wheres} = query, params, {_coll, _model, pk}) do
     wheres
@@ -466,8 +466,8 @@ Logger.debug "ORIGINGAL = #{inspect(original)}"
     to_solr_query(Enum.into(map, []))
   end
 
-#  def to_solr_query([]) do
-#    '*:*'
-#  end
+  def to_solr_query([]) do
+    '*:*'
+  end
 
 end

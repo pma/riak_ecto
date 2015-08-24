@@ -32,6 +32,9 @@ defmodule Riak.Ecto.Encoder do
     do: map_list(list, &encode(&1, pk))
   def encode(%Tagged{value: value, type: type}, _pk),
     do: {:ok, typed_value(value, type)}
+  def encode(%Riak.Ecto.Counter{value: value, increment: increment}, pk) do
+    {:ok, {:counter, value, increment}}
+  end
   def encode(%{__struct__: change, field: field, value: value}, pk)
   when change in [Riak.Ecto.ChangeMap, Riak.Ecto.ChangeArray] do
     case encode(value, pk) do
@@ -78,19 +81,16 @@ defmodule Riak.Ecto.Encoder do
   defp typed_value(value, type, _params),
     do: typed_value(value, type)
 
-  defp typed_value(nil, type) when type in [:string, :integer, :float, :datetime, :date],
-    do: {:register, nil}
-  defp typed_value(nil, type) when type in [:boolean],
-    do: {:flag, nil}
-  defp typed_value(nil, {:embed, %Ecto.Embedded{cardinality: :one}}),
-    do: {:map, nil}
-  defp typed_value(nil, type) when type in [:map],
-    do: {:map, nil}
+  defp typed_value(nil, _type),
+    do: nil
 
   defp typed_value(value, :any),
     do: value
-  defp typed_value(value, {:array, type}),
-    do: Enum.map(value, &typed_value(&1, type))
+  require Logger
+  defp typed_value(value, {:array, type}) do
+    Logger.debug "TYPED VALUE #{inspect(value)} :: #{inspect(type)}"
+    Enum.map(value, &typed_value(&1, type))
+  end
   defp typed_value(value, :binary),
     do: value
   defp typed_value(value, :uuid),

@@ -6,7 +6,7 @@ defmodule Riak.Pool do
 
       defmodule MyPool do
         use Riak.Pool,
-          adapter: Tiak.Pool.Poolboy,
+          adapter: Riak.Pool.Poolboy,
           hostname: "localhost"
        end
 
