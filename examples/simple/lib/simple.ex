@@ -30,7 +30,6 @@ defmodule Weather do
     field :map, :map
 
     field :counter, Riak.Ecto.Counter
-
     field :list, {:array, :integer}
 
     embeds_one :item, Item

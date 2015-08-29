@@ -32,7 +32,7 @@ defmodule Riak.Ecto.Encoder do
     do: map_list(list, &encode(&1, pk))
   def encode(%Tagged{value: value, type: type}, _pk),
     do: {:ok, typed_value(value, type)}
-  def encode(%Riak.Ecto.Counter{value: value, increment: increment}, pk) do
+  def encode(%Riak.Ecto.Counter{value: value, increment: increment}, _pk) do
     {:ok, {:counter, value, increment}}
   end
   def encode(%{__struct__: change, field: field, value: value}, pk)

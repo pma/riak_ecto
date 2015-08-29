@@ -1,6 +1,5 @@
 defmodule Riak.Connection do
   use GenServer
-  require Logger
 
   @spec start_link(Keyword.t) :: GenServer.on_start
   def start_link(opts) do
@@ -84,7 +83,7 @@ defmodule Riak.Connection do
     host = opts[:hostname]
     port = opts[:port]
     {:ok, pid} = :riakc_pb_socket.start_link(host, port,
-                                             [queue_if_disconnected: false,
+                                             [queue_if_disconnected: true,
                                               auto_reconnect: true, keepalive: true])
 
     :timer.send_after(s.heartbeat, self(), :heartbeat)

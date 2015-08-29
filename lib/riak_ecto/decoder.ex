@@ -15,9 +15,9 @@ defmodule Riak.Ecto.Decoder do
   def decode_value(boolean, _pk) when is_boolean(boolean),
     do: boolean
 
-  def decode_value({:counter, value}, _pk) when is_integer(value) do
-    %Riak.Ecto.Counter{value: value, increment: :undefined}
-  end
+  def decode_value(value, _pk) when is_integer(value),
+    do: %Riak.Ecto.Counter{value: value, increment: :undefined}
+
   def decode_value(map, pk) when is_map(map),
     do: decode_document(map, pk)
 end

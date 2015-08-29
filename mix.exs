@@ -9,12 +9,12 @@ defmodule Riak.Ecto.Mixfile do
   end
 
   def application do
-    [applications: [:logger, :flaky, :riakc]]
+    [applications: [:ecto, :flaky, :riakc]]
   end
 
   defp deps do
-    [{:riakc, github: "pma/riak-erlang-client", branch: "pma-ensure_reconnect_if_first_connect_fails"},
+    [{:riakc, github: "basho/riak-erlang-client"},
      {:flaky, github: "pma/flaky"},
-     {:ecto, github: "elixir-lang/ecto"}]
+     {:ecto, "~> 1.0"}]
   end
 end

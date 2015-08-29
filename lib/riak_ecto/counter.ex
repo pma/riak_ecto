@@ -54,7 +54,7 @@ defmodule Riak.Ecto.Counter do
   defimpl Inspect do
     import Inspect.Algebra
 
-    def inspect(counter, opts) do
+    def inspect(counter, _opts) do
       if counter.increment == :undefined do
         concat ["#Riak.Ecto.Counter<", "#{counter.value}", ">"]
       else

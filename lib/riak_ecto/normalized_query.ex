@@ -1,28 +1,27 @@
 defmodule Riak.Ecto.NormalizedQuery do
   @moduledoc false
 
-  require Logger
-
-  defmodule ReadQuery do
+  defmodule SearchQuery do
     @moduledoc false
 
     defstruct coll: nil, pk: nil, params: {}, query: %{},
-              model: nil, filter: "",
-              projection: %{}, fields: [], fl: nil, opts: []
+              model: nil, filter: "", fields: [], order: nil,
+              projection: %{}, opts: []
+  end
+
+  defmodule FetchQuery do
+    @moduledoc false
+
+    defstruct coll: nil, pk: nil, id: nil, fields: [],
+              model: nil, projection: %{}, opts: []
   end
 
   defmodule WriteQuery do
     @moduledoc false
 
     defstruct coll: nil, query: %{}, command: %{},
-              filter: "",
+              filter: nil,
               model: nil, context: nil, opts: []
-  end
-
-  defmodule CommandQuery do
-    @moduledoc false
-
-    defstruct command: nil, opts: []
   end
 
   alias Riak.Ecto.Encoder
@@ -37,35 +36,34 @@ defmodule Riak.Ecto.NormalizedQuery do
 
   def all(%Query{} = original, params) do
     check_query(original)
-Logger.debug "ORIGINGAL = #{inspect(original)}"
+
     from   = from(original)
     params = List.to_tuple(params)
-    query  = query_order(original, params, from)
+    {filter, order} = filter_order(original, params, from)
 
     case projection(original, params, from) do
-      :count ->
-        count(original, query, from)
       {projection, fields} ->
-        Logger.debug "PROJECTION: #{inspect(projection)}  ::  FIELDS #{inspect(fields)}"
-        find_all(original, query, projection, fields, params, from)
+        case filter do
+          {:fetch, id} ->
+            find_one(original, id, projection, fields, params, from)
+          {:search, filter} ->
+            find_all(original, "*:*", filter, order, projection, fields, params, from)
+        end
     end
   end
 
-  defp find_all(original, query, projection, fields, params, {coll, model, pk}) do
+  defp find_all(original, query, filter, order, projection, fields, params, {coll, model, pk}) do
     opts   = opts(:find_all, original)
-    filter = to_solr_query(query) |> IO.iodata_to_binary
-    Logger.debug ("QUERY: #{inspect(query)}  ::  FILTER: #{inspect(filter)}")
-    %ReadQuery{coll: coll, pk: pk, params: params, query: query, projection: projection,
-               fields: fields, opts: opts, filter: filter, model: model}
+
+    %SearchQuery{coll: coll, pk: pk, params: params, query: query, projection: projection,
+                 opts: opts, filter: filter, order: order, fields: fields, model: model}
   end
 
-  defp count(original, query, {coll, _, _}) do
-    command =
-      [count: coll, query: query]
-      |> put_if_not_zero(:limit, rows(original))
-      |> put_if_not_zero(:skip, start(original))
+  defp find_one(original, id, projection, fields, _params, {coll, model, pk}) do
+    opts   = opts(:find_one, original)
 
-    %CommandQuery{command: command, opts: opts(:command)}
+    %FetchQuery{coll: coll, pk: pk, projection: projection, id: id, fields: fields,
+                opts: opts, model: model}
   end
 
   def update(%{source: {_prefix, coll}, model: model, context: context}, values, filter, pk) do
@@ -87,24 +85,17 @@ Logger.debug "ORIGINGAL = #{inspect(original)}"
     %WriteQuery{coll: coll, command: command}
   end
 
-  def command(command, _opts) do
-    %CommandQuery{command: command, opts: opts(:command)}
-  end
-
   defp from(%Query{from: {coll, model}}) do
     {coll, model, primary_key(model)}
   end
 
-  defp query_order(original, params, from) do
-    query = query(original, params, from)
-    order = order(original, from)
-    query_order(query, order)
+  defp filter_order(original, params, from) do
+    #%{query: query, filters: filters} =
+    filter = filter(original, params, from)
+    order  = order(original, from)
+    #query_filters_order(query, filters, order)
+    {filter, order}
   end
-
-  defp query_order(query, order) when order == %{},
-    do: query
-  defp query_order(query, order),
-    do: ["$query": query, "$orderby": order]
 
   defp projection(%Query{select: nil}, _params, _from),
     do: {%{}, []}
@@ -126,29 +117,6 @@ Logger.debug "ORIGINGAL = #{inspect(original)}"
     # Model is nil, we want empty projection, but still extract fields
     {_, facc} = projection(rest, params, from, query, %{}, [field | facc])
     {%{}, facc}
-  end
-  defp projection([{{:., _, [_, name]}, _, _} = field | rest], params, {_, model, _pk} = from, query, pacc, facc) do
-    {_, _, pk} = from
-    # Projections use names as in bucket_type, fields as in models
-    pacc = Map.put(pacc, field(name, pk), riak_type(model.__schema__(:type, name)))
-    facc = [{:field, name, field} | facc]
-    projection(rest, params, from, query, pacc, facc)
-  end
-  # Keyword and interpolated fragments
-  defp projection([{:fragment, _, [args]} = field | rest], params, from, query, pacc, facc)
-  when is_list(args) or tuple_size(args) == 3 do
-    Logger.debug "PROJECTION FRAGMENT 1"
-    {_, _, pk} = from
-    pacc =
-      args
-    |> value(params, pk, query, "select clause")
-    |> Enum.into(pacc)
-    facc = [field | facc]
-
-    projection(rest, params, from, query, pacc, facc)
-  end
-  defp projection([{:count, _, _}], _params, _from, _query, pacc, _facc) when pacc == %{} do
-    :count
   end
   defp projection([{:count, _, _}], _params, _from, query, _pacc, _facc) do
     error(query, "select clause (only one count without other selects is allowed)")
@@ -175,61 +143,50 @@ Logger.debug "ORIGINGAL = #{inspect(original)}"
   defp opts(:find_all, query),
     do: [rows: rows(query), start: start(query)]
 
-  defp opts(:command),
+  defp opts(:find_one, _query),
     do: []
-
-  defp put_if_not_zero(keyword, _key, 0),
-    do: keyword
-  defp put_if_not_zero(keyword, key, value),
-    do: Keyword.put(keyword, key, value)
 
   defp start(%Query{offset: offset}), do: offset_limit(offset)
 
   defp rows(%Query{limit: limit}), do: offset_limit(limit)
 
-  # defp coll({coll, _model, _pk}), do: coll
+  defp filter(%Query{wheres: [%Query.QueryExpr{expr: {:==, _, [{{:., _, [{:&, _, [0]}, pk]}, _, []},
+                                                               right]}}]} = query, params, {_coll, _model, pk}) do
+    {:fetch, value(right, params, pk, query, "where clause")}
+  end
 
-  defp query(%Query{wheres: wheres} = query, params, {_coll, _model, pk}) do
-    wheres
-    |> Enum.map(fn %Query.QueryExpr{expr: expr} ->
-      pair(expr, params, pk, query, "where clause")
-    end)
-    |> :lists.flatten
-    |> merge_keys(query, "where clause")
+  defp filter(%Query{wheres: wheres} = query, params, {_coll, model, pk}) do
+    search =
+      wheres
+      |> Enum.map(fn %Query.QueryExpr{expr: expr} ->
+        pair(expr, params, model, pk, query, "where clause")
+      end)
+      |> Enum.intersperse([" AND "])
+      |> IO.iodata_to_binary
+
+    {:search, search}
   end
 
   defp query(filter, pk) do
     filter |> value(pk, "where clause") |> map_unless_empty
   end
 
-  defp order(%Query{order_bys: order_bys} = query, {_coll, _model, pk}) do
+  defp order(%Query{order_bys: order_bys} = query, {_coll, model, pk}) do
     order_bys
     |> Enum.flat_map(fn %Query.QueryExpr{expr: expr} ->
-      Enum.map(expr, &order_by_expr(&1, pk, query))
+      Enum.map(expr, &order_by_expr(&1, model, pk, query))
     end)
-    |> map_unless_empty
-  end
-
-  defp command(:update, %Query{updates: updates} = query, params, {_coll, _model, pk}) do
-    updates
-    |> Enum.flat_map(fn %Query.QueryExpr{expr: expr} ->
-      Enum.map(expr, fn {key, value} ->
-        value = value |> value(params, pk, query, "update clause")
-        {update_op(key, query), value}
-      end)
-    end)
-    |> merge_keys(query, "update clause")
+    |> Enum.intersperse([","])
+    |> IO.iodata_to_binary
   end
 
   defp command(:insert, document, struct, pk) do
-    Logger.debug "INSERT #{inspect(document)} :: #{inspect(struct)}"
     document
     |> Enum.reject(fn {key, value} -> both_nil(value, Map.get(struct, key)) end)
     |> value(pk, "insert command") |> map_unless_empty
   end
 
   defp command(:update, values, pk) do
-    Logger.debug("UPDATE VALUES #{inspect(values)}")
     [set: values |> value(pk, "update command") |> map_unless_empty]
   end
 
@@ -256,10 +213,10 @@ Logger.debug "ORIGINGAL = #{inspect(original)}"
     end
   end
 
-  defp order_by_expr({:asc,  expr}, pk, query),
-    do: {field(expr, pk, query, "order clause"),  1}
-  defp order_by_expr({:desc, expr}, pk, query),
-    do: {field(expr, pk, query, "order clause"), -1}
+  defp order_by_expr({:asc,  expr}, model, pk, query),
+    do: [ field(expr, model, pk, query, "order clause"), " asc" ]
+  defp order_by_expr({:desc, expr}, model, pk, query),
+    do: [ field(expr, model, pk, query, "order clause"), " desc" ]
 
   defp check_query(query) do
     check(query.distinct, nil, query, "Riak adapter does not support distinct clauses")
@@ -277,27 +234,32 @@ Logger.debug "ORIGINGAL = #{inspect(original)}"
   defp value(expr, pk, place) do
     case Encoder.encode(expr, pk) do
       {:ok, value} -> value
-      :error       ->
-        Logger.error "==> ENCODE ERROR #{inspect({expr})}"
-        error(place)
+      :error       -> error(place)
     end
   end
 
   defp value(expr, params, pk, query, place) do
     case Encoder.encode(expr, params, pk) do
       {:ok, value} -> value
-      :error       ->
-        Logger.error "==> ENCODE ERROR #{inspect({expr, params})}"
-        error(query, place)
+      :error       -> error(query, place)
     end
   end
+
+  defp escaped_value(expr, params, pk, query, place),
+    do: value(expr, params, pk, query, place) |> to_string |> escape_value
 
   defp field(pk, pk), do: :id
   defp field(key, _), do: key
 
-  defp field({{:., _, [{:&, _, [0]}, field]}, _, []}, pk, _query, _place),
-    do: field(field, pk)
-  defp field(_expr, _pk, query, place),
+  defp field(pk, _, pk), do: "_yz_rk"
+  defp field(key, type, _), do: [Atom.to_string(key), '_', Atom.to_string(type)]
+
+  defp field({{:., _, [{:&, _, [0]}, field]}, _, []}, model, pk, _query, _place) do
+    type = model.__schema__(:type, field) |> riak_type
+    field(field, type, pk)
+  end
+
+  defp field(_expr, _model, _pk, query, place),
     do: error(query, place)
 
   defp riak_type(:string),    do: :register
@@ -305,114 +267,87 @@ Logger.debug "ORIGINGAL = #{inspect(original)}"
   defp riak_type(:float),     do: :register
   defp riak_type(:binary_id), do: :register
   defp riak_type(:id),        do: :register
+
+  defp riak_type(:boolean),   do: :flag
+
   defp riak_type(_),          do: :register
 
   defp map_unless_empty([]),   do: %{}
   defp map_unless_empty(list), do: list
 
-  defp merge_keys(keyword, query, place) do
-    Enum.reduce(keyword, %{}, fn {key, value}, acc ->
-      Map.update(acc, key, value, fn
-        old when is_list(old) -> old ++ value
-        _                     -> error(query, place)
-      end)
-    end)
+  {:ok, pattern} = :re.compile(~S"[:;~^\"!*+\-&\?()\][}{\\\|\s#]", [:unicode])
+  @escape_pattern pattern
+
+  defp escape_value(string) do
+    :re.replace(string, @escape_pattern, "\\\\&", [:global, {:return, :binary}])
   end
 
-  update = [set: :set, inc: :inc, push: :push, pull: :pull]
+  bool_ops = [and: "AND", or: "OR"]
 
-  Enum.map(update, fn {key, op} ->
-    def update_op(unquote(key), _query), do: unquote(op)
-  end)
-
-  def update_op(_, query), do: error(query, "update clause")
-
-  binary_ops =
-    [>: :gt, >=: :gte, <: :lt, <=: :lte, !=: :ne, in: :in]
-  bool_ops =
-    [and: :and, or: :or]
-
-  @binary_ops Keyword.keys(binary_ops)
   @bool_ops Keyword.keys(bool_ops)
-
-  Enum.map(binary_ops, fn {op, riak_top} ->
-    defp binary_op(unquote(op)), do: unquote(riak_top)
-  end)
 
   Enum.map(bool_ops, fn {op, riak_top} ->
     defp bool_op(unquote(op)), do: unquote(riak_top)
   end)
 
-  defp mapped_pair_or_value({op, _, _} = tuple, params, pk, query, place) when is_op(op) do
-    [pair(tuple, params, pk, query, place)]
+  defp mapped_pair_or_value({op, _, _} = tuple, params, model, pk, query, place) when is_op(op) do
+    [pair(tuple, params, model, pk, query, place)]
   end
-  defp mapped_pair_or_value(value, params, pk, query, place) do
-    value(value, params, pk, query, place)
-  end
-
-  defp pair({op, _, args}, params, pk, query, place) when op in @bool_ops do
-    args = Enum.map(args, &mapped_pair_or_value(&1, params, pk, query, place))
-    {bool_op(op), args}
-  end
-  defp pair({:is_nil, _, [expr]}, _, pk, query, place) do
-    {field(expr, pk, query, place), nil}
-  end
-  defp pair({:==, _, [left, right]}, params, pk, query, place) do
-    {field(left, pk, query, place), value(right, params, pk, query, place)}
-  end
-  defp pair({:in, _, [left, {:^, _, [ix, len]}]}, params, pk, query, place) do
-    args =
-      ix..ix+len-1
-    |> Enum.map(&elem(params, &1))
-    |> Enum.map(&value(&1, params, pk, query, place))
-
-    {field(left, pk, query, place), ["$in": args]}
-  end
-  defp pair({:in, _, [lhs, {{:., _, _}, _, _} = rhs]}, params, pk, query, place) do
-    {field(rhs, pk, query, place), value(lhs, params, pk, query, place)}
-  end
-  defp pair({op, _, [left, right]}, params, pk, query, place) when op in @binary_ops do
-    {field(left, pk, query, place), [{binary_op(op), value(right, params, pk, query, place)}]}
-  end
-  defp pair({:not, _, [{:in, _, [left, {:^, _, [ix, len]}]}]}, params, pk, query, place) do
-    args =
-      ix..ix+len-1
-    |> Enum.map(&elem(params, &1))
-    |> Enum.map(&value(&1, params, pk, query, place))
-
-    {field(left, pk, query, place), ["$nin": args]}
-  end
-  defp pair({:not, _, [{:in, _, [left, right]}]}, params, pk, query, place) do
-    {field(left, pk, query, place), ["$nin": value(right, params, pk, query, place)]}
-  end
-  defp pair({:not, _, [{:is_nil, _, [expr]}]}, _, pk, query, place) do
-    {field(expr, pk, query, place), ["$ne": nil]}
-  end
-  defp pair({:not, _, [{:==, _, [left, right]}]}, params, pk, query, place) do
-    {field(left, pk, query, place), [ne: value(right, params, pk, query, place)]}
-  end
-  defp pair({:not, _, [expr]}, params, pk, query, place) do
-    {:"$not", [pair(expr, params, pk, query, place)]}
-  end
-  # Keyword or embedded fragment
-  defp pair({:fragment, _, args}, params, pk, query, place) do
-    Logger.debug "FRAGMENT #{inspect({:fragment, args, params, pk, query})}"
-  #when is_list(args) or tuple_size(args) == 3 do
-    value(args, params, pk, query, place)
-  end
-  # This is for queries that uses `where: false`
-  defp pair(bool, _params, _pk, _query, _place) when is_boolean(bool) do
-    {:id, ["$exists": bool]}
+  defp mapped_pair_or_value(value, params, _model, pk, query, place) do
+    escaped_value(value, params, pk, query, place)
   end
 
-  # Keyword or embedded fragment
-  defp pair({:fragment, _, [args]}, params, pk, query, place)
-  when is_list(args) or tuple_size(args) == 3 do
-    value(args, params, pk, query, place)
+  defp pair({:==, _, [left, right]}, params, model, pk, query, place) do
+    [field(left, model, pk, query, place), ':', to_string(value(right, params, pk, query, place))]
   end
 
-  defp pair(_expr, _params, _pk, query, place) do
-    Logger.error "INVALID PAIR #{inspect({_expr, _params, _pk, query, place})}"
+  defp pair({op, _, [left, right]}, params, model, pk, query, place) when op in @bool_ops do
+    left  = mapped_pair_or_value(left, params, model, pk, query, place)
+    right = mapped_pair_or_value(right, params, model, pk, query, place)
+    ["(", left, " ", bool_op(op), " ", right, ")"]
+  end
+
+  defp pair({:>=, _, [left, right]}, params, model, pk, query, place) do
+    ["(",
+     field(left, model, pk, query, place), ":", "[",
+     escaped_value(right, params, pk, query, place), " TO *]", ")"]
+  end
+
+  defp pair({:>, _, [left, right]}, params, model, pk, query, place) do
+    ["(", field(left, model, pk, query, place), ":", "{",
+     escaped_value(right, params, pk, query, place), " TO *]", ")"]
+  end
+
+  defp pair({:<, _, [left, right]}, params, model, pk, query, place) do
+    ["(", field(left, model, pk, query, place), ":", "[* TO ",
+     escaped_value(right, params, pk, query, place), "}", ")"]
+  end
+
+  defp pair({:<=, _, [left, right]}, params, model, pk, query, place) do
+    ["(", field(left, model, pk, query, place), ":", "[* TO ",
+     escaped_value(right, params, pk, query, place), "]", ")"]
+  end
+
+  defp pair({:!=, _, [left, right]}, params, model, pk, query, place) do
+    ["(", "-", "(", field(left, model, pk, query, place), ":",
+     escaped_value(right, params, pk, query, place), ")", ")"]
+  end
+
+  #defp pair({:not, _, [expr]}, params, model, pk, query, place) do
+  #  ["(", "*:* NOT (", pair(expr, params, pk, query, place), "))"]
+  #end
+
+  # embedded fragment
+  defp pair({:fragment, _, args}, params, _model, pk, query, place) when is_list(args) do
+    Enum.map(args, fn arg ->
+      case arg do
+        {:raw, raw}   -> raw
+        {:expr, expr} -> escape_value(to_string(value(expr, params, pk, query, place)))
+      end
+    end)
+  end
+
+  defp pair(_expr, _params, _model, _pk, query, place) do
     error(query, place)
   end
 
@@ -422,52 +357,6 @@ Logger.debug "ORIGINGAL = #{inspect(original)}"
   end
   defp error(place) do
     raise ArgumentError, "2) Invalid expression for Riak adapter in #{place}"
-  end
-
-
-  # Solr query
-  def to_solr_query(%{:ne => expr}) do
-    ['-', '(', to_solr_query(expr), ')' ]
-  end
-
-  def to_solr_query([{field, [gt: value]}]) when is_binary(value) do
-    ['(', to_string(field), '_register', ':', '{', to_string(value), ' TO *]', ')' ]
-  end
-
-  def to_solr_query([{field, [gte: value]}]) when is_binary(value) do
-    ['(', to_string(field), '_register', ':', '[', to_string(value), ' TO *]', ')' ]
-  end
-
-  def to_solr_query(%{:and => [left, right]}) do
-    ['(', to_solr_query(left), ')', ' AND ', '(', to_solr_query(right), ')' ]
-  end
-
-  def to_solr_query(%{:or => [left, right]}) do
-    ['(', to_solr_query(left), ')', ' OR ', '(', to_solr_query(right), ')' ]
-  end
-
-#  def to_solr_query(%{raw: expr}) do
-#    expr
-#  end
-
-  def to_solr_query([{field, value}]) when is_binary(value) do
-    [to_string(field), '_register', ':', value]
-  end
-
-  def to_solr_query([{field, true}]) do
-    [to_string(field), '_flag', ':', 'true']
-  end
-
-  def to_solr_query([{field, false}]) do
-    ['-', to_string(field), '_flag', ':', 'true']
-  end
-
-  def to_solr_query(%{} = map) do
-    to_solr_query(Enum.into(map, []))
-  end
-
-  def to_solr_query([]) do
-    '*:*'
   end
 
 end

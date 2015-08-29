@@ -11,7 +11,8 @@ defmodule Riak.Ecto do
   @behaviour Ecto.Adapter
 
   alias Riak.Ecto.NormalizedQuery
-  alias Riak.Ecto.NormalizedQuery.ReadQuery
+  alias Riak.Ecto.NormalizedQuery.SearchQuery
+  alias Riak.Ecto.NormalizedQuery.FetchQuery
   alias Riak.Ecto.NormalizedQuery.WriteQuery
   alias Riak.Ecto.Decoder
   alias Riak.Ecto.Connection
@@ -63,15 +64,8 @@ defmodule Riak.Ecto do
         :error
     end
   end
-  require Logger
+
   def load(Riak.Ecto.Counter, data) do
-    Logger.debug "COUNTER = #{inspect(data)}"
-#    case Riak.Ecto.Counter.cast(data) do
-#      {:ok, data} ->
-#        Ecto.Type.load(Riak.Ecto.Counter, data, &load/2)
-#      :error ->
-#        :error
-    #    end
     Ecto.Type.load(Riak.Ecto.Counter, data, &load/2)
   end
 
@@ -89,8 +83,6 @@ defmodule Riak.Ecto do
     end)
     Ecto.Type.load(type, data, &load/2)
   end
-
-  require Logger
 
   def load({:array, _} = type, nil),
     do: Ecto.Type.load(type, nil, &load/2)
@@ -118,7 +110,6 @@ defmodule Riak.Ecto do
   def dump(Ecto.Date, %Ecto.Date{} = data),
     do: Ecto.Type.dump(:string, Ecto.Date.to_iso8601(data), &dump/2)
   def dump(type, data) do
-    Logger.warn "DUMP #{inspect(type)} :: #{inspect(data)}"
     Ecto.Type.dump(type, data, &dump/2)
   end
 
@@ -139,12 +130,14 @@ defmodule Riak.Ecto do
     raise ArgumentError, "Riak adapter does not support delete_all."
   end
 
+  @read_queries [SearchQuery, FetchQuery]
+
   def execute(repo, _meta, {function, query}, params, preprocess, opts) do
     case apply(NormalizedQuery, function, [query, params]) do
-      %ReadQuery{} = read ->
+      %{__struct__: read} = query when read in [FetchQuery, SearchQuery] ->
         {rows, count} =
-          Connection.all(repo.__riak_pool__, read, opts)
-          |> Enum.map_reduce(0, &{process_document(&1, read, preprocess), &2 + 1})
+          Connection.all(repo.__riak_pool__, query, opts)
+          |> Enum.map_reduce(0, &{process_document(&1, query, preprocess), &2 + 1})
         {count, rows}
       %WriteQuery{} = write ->
         result = apply(Connection, function, [repo.__riak_pool__, write, opts])
@@ -210,10 +203,9 @@ defmodule Riak.Ecto do
       "No causal context in #{inspect meta.model}. " <>
       "Get the model by id before trying to update it."
   end
-require Logger
+
   def update(repo, meta, fields, filter, {pk, :binary_id, _value}, [], opts) do
     normalized = NormalizedQuery.update(meta, fields, filter, pk)
-Logger.debug "UPDATE FIELDS #{inspect(fields)}"
     Connection.update(repo.__riak_pool__, normalized, opts)
   end
 
@@ -263,8 +255,8 @@ Logger.debug "UPDATE FIELDS #{inspect(fields)}"
   defp format_log(_entry, :update_type, [bucket, id, _opts]) do
     ["UPDATE_TYPE", format_part("bucket", bucket), format_part("id", id)]
   end
-  defp format_log(_entry, :search, [index, query, _opts]) do
-    ["SEARCH", format_part("index", index), format_part("query", query)]
+  defp format_log(_entry, :search, [index, filter, _opts]) do
+    ["SEARCH", format_part("index", index), format_part("filter", filter)]
   end
   defp format_log(_entry, :delete, [coll, filter, _opts]) do
     ["DELETE", format_part("coll", coll), format_part("filter", filter),

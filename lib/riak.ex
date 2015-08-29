@@ -32,10 +32,10 @@ defmodule Riak do
   end
 
   def search(pool, index, query, opts) do
-    opts = [{:rows, opts[:limit]} | [{:start, opts[:offset]} | opts]]
+    opts = [{:rows, opts[:limit]} | [{:start, opts[:offset]} | opts]] ++ [{:sort, opts[:order]}]
     |> filter_nils
 
-    Pool.run_with_log(pool, :search, [index, query], [], fn pid ->
+    Pool.run_with_log(pool, :search, [index, opts[:filter]], [], fn pid ->
       case Connection.search(pid, index, query, search_options(opts)) do
         {:ok, {:search_results, results, _score, _total_count}} ->
         {:ok, results}

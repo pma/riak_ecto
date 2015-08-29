@@ -24,16 +24,7 @@ defmodule Riak.Pool do
   arguments passed as the fifth argument to the log function):
 
     * `:run_command`,  `[query, options]`
-    * `:insert_one`,   `[collection, document, options]`
-    * `:insert_many`,  `[collection, documents, options]`
-    * `:delete_one`,   `[collection, filter, options]`
-    * `:delete_many`,  `[collection, filter, options]`
-    * `:replace_one`,  `[collection, filter, replacement, options]`
-    * `:update_one`,   `[collection, filter, update, options]`
-    * `:update_many`,  `[collection, filter, update, options]`
-    * `:find_cursor`,  `[collection, query, projection, options]`
-    * `:find_batch`,   `[collection, cursor, options]`
-    * `:kill_cursors`, `[cursors, options]`
+    * `:fetch_type`,   `[bucket, key]`
 
   """
 
