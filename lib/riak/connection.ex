@@ -100,7 +100,7 @@ defmodule Riak.Connection do
             {:noreply, s}
           {:error, _reason} ->
             :ok = :riakc_pb_socket.stop(s.pid)
-            :timer.send_after(s.timeout, self(), :connect)
+            send(self(), :connect)
             {:noreply, s}
         end
       {false, _} ->
