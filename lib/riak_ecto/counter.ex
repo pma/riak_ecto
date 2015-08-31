@@ -20,7 +20,7 @@ defmodule Riak.Ecto.Counter do
   Casts to database format
   """
   def cast(%__MODULE__{} = value), do: {:ok, value}
-  def cast(_), do: :eror
+  def cast(_), do: :error
 
   @doc """
   Converts to a database format

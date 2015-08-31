@@ -47,6 +47,7 @@ defmodule Riak.Ecto.Connection do
       {{k, :flag}, v}, m     -> Dict.put(m, k, v)
       {{k, :register}, v}, m -> Dict.put(m, k, v)
       {{k, :counter}, v}, m  -> Dict.put(m, k, v)
+      {{k, :set}, v}, m      -> Dict.put(m, k, v)
       {{k, :map}, v}, m      -> Dict.put(m, k, crdt_to_map((v)))
     end)
   end
@@ -111,6 +112,19 @@ defmodule Riak.Ecto.Connection do
   defp apply_change(map, {k, {:counter, _value, increment}}) do
     map = erase_key_unless_type(map, k, [:counter])
     :riakc_map.update({k, :counter}, &:riakc_counter.increment(increment, &1), map)
+  end
+
+  defp apply_change(map, {k, {:set, value}}) when is_list(value) do
+    map = erase_key_unless_type(map, k, [:set])
+    :riakc_map.update({k, :set}, fn set ->
+      dirty_value = :riakc_set.value(set)
+      to_add = value -- dirty_value
+      to_rem = dirty_value -- value
+
+      set = Enum.reduce(to_add, set, &:riakc_set.add_element(&1, &2))
+      set = Enum.reduce(to_rem, set, &:riakc_set.del_element(&1, &2))
+      set
+    end, map)
   end
 
   defp apply_change(crdt_map, {key, value_map}) when is_map(value_map) do

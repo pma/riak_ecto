@@ -69,6 +69,10 @@ defmodule Riak.Ecto do
     Ecto.Type.load(Riak.Ecto.Counter, data, &load/2)
   end
 
+  def load(Riak.Ecto.Set, data) do
+    Ecto.Type.load(Riak.Ecto.Set, data, &load/2)
+  end
+
   def load(:float, data) when is_binary(data),
     do: Ecto.Type.load(:float, String.to_float(data), &load/2)
   def load(:integer, data) when is_binary(data),
