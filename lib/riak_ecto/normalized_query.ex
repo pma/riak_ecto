@@ -53,14 +53,14 @@ defmodule Riak.Ecto.NormalizedQuery do
   end
 
   defp find_all(original, query, filter, order, projection, fields, params, {coll, model, pk}) do
-    opts   = opts(:find_all, original)
+    opts = opts(:find_all, original, params, pk)
 
     %SearchQuery{coll: coll, pk: pk, params: params, query: query, projection: projection,
                  opts: opts, filter: filter, order: order, fields: fields, model: model}
   end
 
-  defp find_one(original, id, projection, fields, _params, {coll, model, pk}) do
-    opts   = opts(:find_one, original)
+  defp find_one(original, id, projection, fields, params, {coll, model, pk}) do
+    opts = opts(:find_one, original, params, pk)
 
     %FetchQuery{coll: coll, pk: pk, projection: projection, id: id, fields: fields,
                 opts: opts, model: model}
@@ -140,15 +140,14 @@ defmodule Riak.Ecto.NormalizedQuery do
     projection(rest, params, from, query, pacc, facc)
   end
 
-  defp opts(:find_all, query),
-    do: [rows: rows(query), start: start(query)]
+  defp opts(:find_all, query, params, pk),
+    do: [rows: rows(query, params, pk), start: start(query, params, pk)]
 
-  defp opts(:find_one, _query),
+  defp opts(:find_one, _query, _params, _pk),
     do: []
 
-  defp start(%Query{offset: offset}), do: offset_limit(offset)
-
-  defp rows(%Query{limit: limit}), do: offset_limit(limit)
+  defp start(%Query{offset: offset} = query, params, pk), do: offset_limit(offset, query, params, pk)
+  defp rows(%Query{limit: limit} = query, params, pk), do: offset_limit(limit, query, params, pk)
 
   defp filter(%Query{wheres: [%Query.QueryExpr{expr: {:==, _, [{{:., _, [{:&, _, [0]}, pk]}, _, []},
                                                                right]}}]} = query, params, {_coll, _model, pk}) do
@@ -196,10 +195,15 @@ defmodule Riak.Ecto.NormalizedQuery do
   defp both_nil(false, _), do: true
   defp both_nil(_, _), do: false
 
-  defp offset_limit(nil),
+  defp offset_limit(nil, _, _, _),
     do: nil
-  defp offset_limit(%Query.QueryExpr{expr: int}) when is_integer(int),
+  defp offset_limit(%Query.QueryExpr{expr: int}, _query, _params, _pk) when is_integer(int),
     do: int
+  defp offset_limit(%Query.QueryExpr{expr: int}, _query, _params, _pk) when is_integer(int),
+    do: int
+  defp offset_limit(%Query.QueryExpr{expr: expr},  query, params, pk) do
+    value(expr, params, pk, query, "offset/limit clause") |> String.to_integer
+  end
 
   defp primary_key(nil),
     do: nil
