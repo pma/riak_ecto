@@ -13,6 +13,7 @@ defmodule Riak.Ecto do
   alias Riak.Ecto.NormalizedQuery
   alias Riak.Ecto.NormalizedQuery.SearchQuery
   alias Riak.Ecto.NormalizedQuery.FetchQuery
+  alias Riak.Ecto.NormalizedQuery.CountQuery
   alias Riak.Ecto.NormalizedQuery.WriteQuery
   alias Riak.Ecto.Decoder
   alias Riak.Ecto.Connection
@@ -138,7 +139,7 @@ defmodule Riak.Ecto do
 
   def execute(repo, _meta, {function, query}, params, preprocess, opts) do
     case apply(NormalizedQuery, function, [query, params]) do
-      %{__struct__: read} = query when read in [FetchQuery, SearchQuery] ->
+      %{__struct__: read} = query when read in [FetchQuery, SearchQuery, CountQuery] ->
         {rows, count} =
           Connection.all(repo.__riak_pool__, query, opts)
           |> Enum.map_reduce(0, &{process_document(&1, query, preprocess), &2 + 1})

@@ -37,8 +37,8 @@ defmodule Riak do
 
     Pool.run_with_log(pool, :search, [index, opts[:filter]], [], fn pid ->
       case Connection.search(pid, index, query, search_options(opts)) do
-        {:ok, {:search_results, results, _score, _total_count}} ->
-        {:ok, results}
+        {:ok, {:search_results, results, _score, total_count}} ->
+        {:ok, {results, total_count}}
       end
     end)
   end

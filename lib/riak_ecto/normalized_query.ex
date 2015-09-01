@@ -16,6 +16,14 @@ defmodule Riak.Ecto.NormalizedQuery do
               model: nil, projection: %{}, opts: []
   end
 
+  defmodule CountQuery do
+    @moduledoc false
+
+    defstruct coll: nil, pk: nil, params: {}, query: %{},
+              model: nil, filter: "", fields: [], order: nil,
+              projection: %{}, opts: []
+  end
+
   defmodule WriteQuery do
     @moduledoc false
 
@@ -42,6 +50,11 @@ defmodule Riak.Ecto.NormalizedQuery do
     {filter, order} = filter_order(original, params, from)
 
     case projection(original, params, from) do
+      {:count, fields} ->
+        case filter do
+          {:search, filter} ->
+            count(original, filter, fields, from)
+        end
       {projection, fields} ->
         case filter do
           {:fetch, id} ->
@@ -57,6 +70,11 @@ defmodule Riak.Ecto.NormalizedQuery do
 
     %SearchQuery{coll: coll, pk: pk, params: params, query: query, projection: projection,
                  opts: opts, filter: filter, order: order, fields: fields, model: model}
+  end
+
+  defp count(_original, filter, fields, {coll, model, pk}) do
+    %CountQuery{coll: coll, pk: pk, filter: filter,
+                fields: fields, model: model}
   end
 
   defp find_one(original, id, projection, fields, params, {coll, model, pk}) do
@@ -118,9 +136,15 @@ defmodule Riak.Ecto.NormalizedQuery do
     {_, facc} = projection(rest, params, from, query, %{}, [field | facc])
     {%{}, facc}
   end
-  defp projection([{:count, _, _}], _params, _from, query, _pacc, _facc) do
-    error(query, "select clause (only one count without other selects is allowed)")
+  defp projection([{:count, _, _} = field], _params, _from, _query, pacc, _facc) when pacc == %{} do
+    {:count, [{:field, :value, field}]}
   end
+#  defp projection([{op, _, [name]} = field], _params, from, query, pacc, _facc) when pacc == %{} and op in [:count] do
+#    {_, _, pk} = from
+#    name  = field(name, pk, query, "select clause")
+#    field = {:field, :value, field}
+#    {:aggregate, [["$group": [_id: nil, value: [{"$#{op}", "$#{name}"}]]]], [field]}
+#  end
   defp projection([{op, _, _} | _rest], _params, _from, query, _pacc, _facc) when is_op(op) do
     error(query, "select clause")
   end

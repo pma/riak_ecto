@@ -3,6 +3,7 @@ defmodule Riak.Ecto.Connection do
 
   alias Riak.Ecto.NormalizedQuery.SearchQuery
   alias Riak.Ecto.NormalizedQuery.FetchQuery
+  alias Riak.Ecto.NormalizedQuery.CountQuery
   alias Riak.Ecto.NormalizedQuery.WriteQuery
 
   ## Worker
@@ -37,8 +38,23 @@ defmodule Riak.Ecto.Connection do
     opts = [{:filter, filter} | opts] ++ [{:sort, order}]
 
     case Riak.search(pool, coll, query, opts) do
-      {:ok, results} ->
+      {:ok, {results, _total_count}} ->
         Enum.map(results, &solr_to_map/1)
+    end
+  end
+
+  def all(pool, %CountQuery{} = query, opts) do
+    coll        = query.coll
+    _projection = query.projection
+    opts        = query.opts ++ opts
+    filter      = query.filter
+    query       = "*:*" #query.query
+
+    opts = [filter: filter, rows: 0, start: 0] ++ opts
+
+    case Riak.search(pool, coll, query, opts) do
+      {:ok, {_, total_count}} ->
+        [%{"value" => total_count}]
     end
   end
 
@@ -46,8 +62,8 @@ defmodule Riak.Ecto.Connection do
     Enum.reduce(values, %{}, fn
       {{k, :flag}, v}, m     -> Dict.put(m, k, v)
       {{k, :register}, v}, m -> Dict.put(m, k, v)
-      {{k, :counter}, v}, m  -> Dict.put(m, k, v)
-      {{k, :set}, v}, m      -> Dict.put(m, k, v)
+      {{k, :counter}, v}, m  -> Dict.put(m, k, {:counter, v})
+      {{k, :set}, v}, m      -> Dict.put(m, k, {:set, v})
       {{k, :map}, v}, m      -> Dict.put(m, k, crdt_to_map((v)))
     end)
   end
@@ -72,7 +88,7 @@ defmodule Riak.Ecto.Connection do
     case Regex.scan(~r/(.*)_(map|register|counter|flag|set)/r, key, capture: :all_but_first) do
       [[field, "register"]] -> Dict.put(map, field, value)
       [[field, "flag"]]     -> Dict.put(map, field, value == "true")
-      [[field, "counter"]]  -> Dict.put(map, field, String.to_integer(value))
+      [[field, "counter"]]  -> Dict.put(map, field, {:counter, String.to_integer(value)})
       [[field, "map"]]      -> Dict.update(Dict.put_new(map, field, %{}), field, %{}, &map_solr_field(key_rest, value, &1))
       _                     -> map
     end
