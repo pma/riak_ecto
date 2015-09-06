@@ -18,10 +18,10 @@ defmodule Riak.Ecto.Connection do
 
     case Riak.fetch_type(pool, coll, query.id) do
       {:ok, map} ->
-        [ map
-          |>:riakc_map.value
-          |> crdt_to_map
-          |> Map.merge(%{id: query.id, context: map}) ]
+        [map
+         |>:riakc_map.value
+         |> crdt_to_map
+         |> Map.merge(%{id: query.id, context: %{map: map, total_count: 1}})]
       {:error, :not_found} ->
         []
     end
@@ -38,8 +38,12 @@ defmodule Riak.Ecto.Connection do
     opts = [{:filter, filter} | opts] ++ [{:sort, order}]
 
     case Riak.search(pool, coll, query, opts) do
-      {:ok, {results, _total_count}} ->
-        Enum.map(results, &solr_to_map/1)
+      {:ok, {results, total_count}} ->
+        Enum.map(results, fn result ->
+          result
+          |> solr_to_map
+          |> Map.merge(%{context: %{map: nil, total_count: total_count}})
+        end)
     end
   end
 
@@ -196,7 +200,7 @@ defmodule Riak.Ecto.Connection do
     _opts   = query.opts ++ opts
     query   = query.query
 
-    map = apply_changes(context, Dict.fetch!(command, :set))
+    map = apply_changes(context.map, Dict.fetch!(command, :set))
     op  =  :riakc_map.to_op(map)
 
     case Riak.update_type(pool, coll, query[:id], op) do
@@ -213,7 +217,7 @@ defmodule Riak.Ecto.Connection do
 
     id = command[:id] || :undefined
 
-    map = apply_changes(context, command)
+    map = apply_changes(context.map, command)
 
     case Riak.update_type(pool, coll, id, :riakc_map.to_op(map)) do
       :ok       -> {:ok, 1}

@@ -203,6 +203,12 @@ defmodule Riak.Ecto do
       "The following fields in #{inspect meta.model} are tagged as such: #{inspect returning}"
   end
 
+  def update(_repo, %{context: %{map: nil}} = meta, _fields, _filter, _, _, _opts) do
+    raise ArgumentError,
+      "No causal context in #{inspect meta.model}. " <>
+      "Get the model by id before trying to update it."
+  end
+
   def update(_repo, %{context: nil} = meta, _fields, _filter, _, _, _opts) do
     raise ArgumentError,
       "No causal context in #{inspect meta.model}. " <>
