@@ -196,7 +196,7 @@ defmodule Riak.Ecto.Connection do
   def update(pool,  %WriteQuery{} = query, opts) do
     coll    = query.coll
     command = query.command
-    context = query.context
+    context = query.context || %{}
     _opts   = query.opts ++ opts
     query   = query.query
 
@@ -212,7 +212,7 @@ defmodule Riak.Ecto.Connection do
   def insert(pool, %WriteQuery{} = query, opts) do
     coll    = query.coll
     command = query.command
-    context = query.context
+    context = query.context || %{}
     _opts   = query.opts ++ opts
 
     id = command[:id] || :undefined
