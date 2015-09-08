@@ -23,7 +23,7 @@ defmodule Riak do
   end
 
   def delete(pool, bucket, id) do
-    Pool.run_with_log(pool, :delete_one, [bucket, id], [], fn pid ->
+    Pool.run_with_log(pool, :delete, [bucket, id], [], fn pid ->
       case Connection.delete(pid, bucket, id) do
         :ok              -> :ok
         {:error, reason} -> {:error, reason}
