@@ -200,7 +200,7 @@ defmodule Riak.Ecto.Connection do
     _opts   = query.opts ++ opts
     query   = query.query
 
-    map = apply_changes(context.map, Dict.fetch!(command, :set))
+    map = apply_changes(Map.get(context, :map), Dict.fetch!(command, :set))
     op  =  :riakc_map.to_op(map)
 
     case Riak.update_type(pool, coll, query[:id], op) do
@@ -217,7 +217,7 @@ defmodule Riak.Ecto.Connection do
 
     id = command[:id] || :undefined
 
-    map = apply_changes(context.map, command)
+    map = apply_changes(Map.get(context, :map), command)
 
     case Riak.update_type(pool, coll, id, :riakc_map.to_op(map)) do
       :ok       -> {:ok, 1}
