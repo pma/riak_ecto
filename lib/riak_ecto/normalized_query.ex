@@ -357,13 +357,13 @@ defmodule Riak.Ecto.NormalizedQuery do
   end
 
   defp pair({:!=, _, [left, right]}, params, model, pk, query, place) do
-    ["(", "-", "(", field(left, model, pk, query, place), ":",
+    ["(", "*:* NOT ", "(", field(left, model, pk, query, place), ":",
      escaped_value(right, params, pk, query, place), ")", ")"]
   end
 
-  #defp pair({:not, _, [expr]}, params, model, pk, query, place) do
-  #  ["(", "*:* NOT (", pair(expr, params, pk, query, place), "))"]
-  #end
+  defp pair({:not, _, [expr]}, params, model, pk, query, place) do
+    ["(", "*:* NOT (", pair(expr, params, model, pk, query, place), "))"]
+  end
 
   # embedded fragment
   defp pair({:fragment, _, args}, params, _model, pk, query, place) when is_list(args) do
