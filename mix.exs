@@ -15,6 +15,6 @@ defmodule Riak.Ecto.Mixfile do
   defp deps do
     [{:riakc, github: "basho/riak-erlang-client"},
      {:flaky, github: "pma/flaky"},
-     {:ecto,  "~> 1.0.2"}]
+     {:ecto,  "~> 1.0"}]
   end
 end
