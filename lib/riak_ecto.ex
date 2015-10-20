@@ -47,6 +47,11 @@ defmodule Riak.Ecto do
   end
 
   @doc false
+  def stop(repo, _pid, _timeout \\ 5_000) do
+    repo.__riak_pool.stop
+  end
+
+  @doc false
   def load(:binary_id, data),
     do: Ecto.Type.load(:string, data, &load/2)
   def load(Ecto.DateTime, data) when is_binary(data) do
