@@ -34,7 +34,7 @@ defmodule Weather do
 
     field :list, {:array, :integer}
 
-    embeds_one :item, Item
+    embeds_one :item, Item, on_replace: :delete
     embeds_many :items, Item
 
     timestamps

@@ -197,7 +197,7 @@ defmodule Riak.Ecto.Connection do
     coll    = query.coll
     command = query.command
     context = query.context || %{}
-    _opts   = query.opts ++ opts
+    _       = query.opts ++ opts
     query   = query.query
 
     map = apply_changes(Map.get(context, :map), Dict.fetch!(command, :set))
@@ -213,7 +213,7 @@ defmodule Riak.Ecto.Connection do
     coll    = query.coll
     command = query.command
     context = query.context || %{}
-    _opts   = query.opts ++ opts
+    _       = query.opts ++ opts
 
     id = command[:id] || :undefined
 
@@ -227,8 +227,8 @@ defmodule Riak.Ecto.Connection do
 
   def delete(pool, %WriteQuery{} = query, opts) do
     coll     = query.coll
-    _context = query.context
-    _opts    = query.opts ++ opts
+    _        = query.context
+    _        = query.opts ++ opts
     query    = query.query
 
     id = Dict.fetch!(query, :id)
