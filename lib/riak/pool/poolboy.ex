@@ -23,11 +23,17 @@ defmodule Riak.Pool.Poolboy do
       |> Keyword.put(:worker_module, Riak.Connection)
       |> Keyword.put(:size, size)
       |> Keyword.put_new(:max_overflow, 0)
+      |> Keyword.put_new(:strategy, :fifo)
+      |> Keyword.put_new(:max_overflow, 0)
 
     :poolboy.start_link(pool_opts, worker_opts)
   end
 
   def run(pool, fun) do
+    do_run(pool, fun, 0)
+  end
+
+  def do_run(pool, fun, retry_count) do
     {queue_time, pid} = :timer.tc(:poolboy, :checkout, [pool])
     ret =
       try do
@@ -36,6 +42,16 @@ defmodule Riak.Pool.Poolboy do
         :ok = :poolboy.checkin(pool, pid)
       end
 
-    {queue_time, ret}
+    case ret do
+      {:error, :disconnected} ->
+        {_, workers, _, _} = :poolboy.status(pool)
+        if retry_count >= workers do
+          {queue_time, ret}
+        else
+          do_run(pool, fun, retry_count + 1)
+        end
+      _ ->
+        {queue_time, ret}
+    end
   end
 end
