@@ -48,7 +48,7 @@ defmodule Riak.Pool do
         import Supervisor.Spec, warn: false
 
         children = [
-          worker(@adapter, [@name, opts]),
+          worker(@adapter, [@name, opts])
         ]
 
         opts = [strategy: :one_for_all, name: @sup]

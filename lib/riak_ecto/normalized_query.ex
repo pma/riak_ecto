@@ -6,6 +6,7 @@ defmodule Riak.Ecto.NormalizedQuery do
 
     defstruct coll: nil, pk: nil, params: {}, query: %{},
               model: nil, filter: "", fields: [], order: nil,
+              prefix: nil,
               projection: %{}, opts: []
   end
 
@@ -13,22 +14,15 @@ defmodule Riak.Ecto.NormalizedQuery do
     @moduledoc false
 
     defstruct coll: nil, pk: nil, id: nil, fields: [],
+              prefix: nil,
               model: nil, projection: %{}, opts: []
-  end
-
-  defmodule CountQuery do
-    @moduledoc false
-
-    defstruct coll: nil, pk: nil, params: {}, query: %{},
-              model: nil, filter: "", fields: [], order: nil,
-              projection: %{}, opts: []
   end
 
   defmodule WriteQuery do
     @moduledoc false
 
     defstruct coll: nil, query: %{}, command: %{},
-              filter: nil,
+              filter: nil, prefix: nil,
               model: nil, context: nil, opts: []
   end
 
@@ -50,11 +44,6 @@ defmodule Riak.Ecto.NormalizedQuery do
     {filter, order} = filter_order(original, params, from)
 
     case projection(original, params, from) do
-      {:count, fields} ->
-        case filter do
-          {:search, filter} ->
-            count(original, filter, fields, from)
-        end
       {projection, fields} ->
         case filter do
           {:fetch, id} ->
@@ -69,38 +58,34 @@ defmodule Riak.Ecto.NormalizedQuery do
     opts = opts(:find_all, original, params, pk)
 
     %SearchQuery{coll: coll, pk: pk, params: params, query: query, projection: projection,
-                 opts: opts, filter: filter, order: order, fields: fields, model: model}
-  end
-
-  defp count(_original, filter, fields, {coll, model, pk}) do
-    %CountQuery{coll: coll, pk: pk, filter: filter,
-                fields: fields, model: model}
+                 opts: opts, filter: filter, order: order, fields: fields, model: model,
+                 prefix: original.prefix}
   end
 
   defp find_one(original, id, projection, fields, params, {coll, model, pk}) do
     opts = opts(:find_one, original, params, pk)
 
     %FetchQuery{coll: coll, pk: pk, projection: projection, id: id, fields: fields,
-                opts: opts, model: model}
+                opts: opts, model: model, prefix: original.prefix}
   end
 
-  def update(%{source: {_prefix, coll}, model: model, context: context}, values, filter, pk) do
+  def update(%{source: {prefix, coll}, model: model, context: context}, values, filter, pk) do
     command = command(:update, values, pk)
     query   = query(filter, pk)
 
-    %WriteQuery{coll: coll, query: query, command: command, context: context, model: model}
+    %WriteQuery{coll: coll, query: query, command: command, context: context, model: model, prefix: prefix}
   end
 
-  def delete({_prefix, coll}, context, filter, pk) do
+  def delete({prefix, coll}, context, filter, pk) do
     query = query(filter, pk)
 
-    %WriteQuery{coll: coll, query: query, context: context}
+    %WriteQuery{coll: coll, query: query, context: context, prefix: prefix}
   end
 
-  def insert(%{context: _context, model: model, source: {_prefix, coll}}, document, pk) do
+  def insert(%{source: {prefix, coll}, model: model}, document, pk) do
     command = command(:insert, document, model.__struct__(), pk)
 
-    %WriteQuery{coll: coll, command: command}
+    %WriteQuery{coll: coll, command: command, prefix: prefix}
   end
 
   defp from(%Query{from: {coll, model}}) do
@@ -108,10 +93,8 @@ defmodule Riak.Ecto.NormalizedQuery do
   end
 
   defp filter_order(original, params, from) do
-    #%{query: query, filters: filters} =
     filter = filter(original, params, from)
     order  = order(original, from)
-    #query_filters_order(query, filters, order)
     {filter, order}
   end
 
@@ -136,15 +119,6 @@ defmodule Riak.Ecto.NormalizedQuery do
     {_, facc} = projection(rest, params, from, query, %{}, [field | facc])
     {%{}, facc}
   end
-  defp projection([{:count, _, _} = field], _params, _from, _query, pacc, _facc) when pacc == %{} do
-    {:count, [{:field, :value, field}]}
-  end
-#  defp projection([{op, _, [name]} = field], _params, from, query, pacc, _facc) when pacc == %{} and op in [:count] do
-#    {_, _, pk} = from
-#    name  = field(name, pk, query, "select clause")
-#    field = {:field, :value, field}
-#    {:aggregate, [["$group": [_id: nil, value: [{"$#{op}", "$#{name}"}]]]], [field]}
-#  end
   defp projection([{op, _, _} | _rest], _params, _from, query, _pacc, _facc) when is_op(op) do
     error(query, "select clause")
   end
@@ -174,6 +148,11 @@ defmodule Riak.Ecto.NormalizedQuery do
   defp rows(%Query{limit: limit} = query, params, pk), do: offset_limit(limit, query, params, pk)
 
   defp filter(%Query{wheres: [%Query.QueryExpr{expr: {:==, _, [{{:., _, [{:&, _, [0]}, pk]}, _, []},
+                                                               right]}}]} = query, params, {_coll, _model, pk}) do
+    {:fetch, value(right, params, pk, query, "where clause")}
+  end
+
+  defp filter(%Query{wheres: [%Query.QueryExpr{expr: {:in, _, [{{:., _, [{:&, _, [0|_]}, pk]}, _, []},
                                                                right]}}]} = query, params, {_coll, _model, pk}) do
     {:fetch, value(right, params, pk, query, "where clause")}
   end
@@ -246,7 +225,7 @@ defmodule Riak.Ecto.NormalizedQuery do
   defp order_by_expr({:desc, expr}, model, pk, query),
     do: [ field(expr, model, pk, query, "order clause"), " desc" ]
 
-  defp check_query(query) do
+    defp check_query(query) do
     check(query.distinct, nil, query, "Riak adapter does not support distinct clauses")
     check(query.lock,     nil, query, "Riak adapter does not support locking")
     check(query.joins,     [], query, "Riak adapter does not support join clauses")
@@ -363,6 +342,10 @@ defmodule Riak.Ecto.NormalizedQuery do
 
   defp pair({:not, _, [expr]}, params, model, pk, query, place) do
     ["(", "*:* NOT (", pair(expr, params, model, pk, query, place), "))"]
+  end
+
+  defp pair({:in, _, [left, right]}, params, model, pk, query, place) do
+    [field(left, model, pk, query, place), ':', to_string(value(right, params, pk, query, place))]
   end
 
   # embedded fragment

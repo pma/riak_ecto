@@ -3,18 +3,17 @@ defmodule Riak.Ecto.Mixfile do
 
   def project do
     [app: :riak_ecto,
-     version: "0.0.1",
-     elixir: "~> 1.0",
+     version: "0.1.0",
+     elixir: "~> 1.2",
      deps: deps]
   end
 
   def application do
-    [applications: [:ecto, :flaky, :riakc]]
+    [applications: [:riakc, :ecto]]
   end
 
   defp deps do
     [{:riakc, github: "basho/riak-erlang-client"},
-     {:flaky, github: "pma/flaky"},
-     {:ecto,  "~> 1.0"}]
+     {:ecto,  "~> 1.1"}]
   end
 end

@@ -22,7 +22,6 @@
     <!-- custom fields -->
     <field name="q" type="search_pt" indexed="true" stored="false" multiValued="true"/>
 
-    <field name="price" type="currency" indexed="true" stored="true" multiValued="false" omitNorms="true"/>
     <field name="datetime" type="tdate" indexed="true" stored="false" multiValued="false" omitNorms="true"/>
 
     <field name="temp_hi_register" type="tint" indexed="true" stored="true" multiValued="false" omitNorms="true"/>
@@ -131,8 +130,6 @@
    <fieldType name="long" class="solr.TrieLongField" precisionStep="0" positionIncrementGap="0"/>
    <fieldType name="double" class="solr.TrieDoubleField" precisionStep="0" positionIncrementGap="0"/>
 
-   <fieldType name="currency" class="solr.CurrencyField"
-              precisionStep="8" currencyConfig="currency.xml" defaultCurrency="AOA" />
    <!--
        Numeric field types that index each value at various levels of precision
        to accelerate range queries when the number of values between the range

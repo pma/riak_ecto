@@ -10,6 +10,8 @@ defmodule Riak.Ecto.Encoder do
     do: map_list(list, &encode(&1, params, pk))
   def encode({:^, _, [idx]}, params, pk),
     do: elem(params, idx) |> encode(params, pk)
+  def encode({:^, _, [idx | _]}, params, pk),
+    do: elem(params, idx) |> encode(params, pk)
   def encode(%Tagged{value: value, type: type}, params, _pk),
     do: {:ok, typed_value(value, type, params)}
   def encode(%{__struct__: _} = struct, _params, pk),

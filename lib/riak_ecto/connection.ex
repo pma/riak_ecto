@@ -3,25 +3,28 @@ defmodule Riak.Ecto.Connection do
 
   alias Riak.Ecto.NormalizedQuery.SearchQuery
   alias Riak.Ecto.NormalizedQuery.FetchQuery
-  alias Riak.Ecto.NormalizedQuery.CountQuery
   alias Riak.Ecto.NormalizedQuery.WriteQuery
 
   ## Worker
 
   ## Callbacks for adapter
 
+  defp bucket(nil, coll), do: coll
+  defp bucket(prefix, _), do: prefix
+
   def all(pool, query, opts \\ [])
 
   def all(pool, %FetchQuery{} = query, _opts) do
     coll        = query.coll
+    prefix      = query.prefix
     _projection = query.projection
 
-    case Riak.fetch_type(pool, coll, query.id) do
+    case Riak.fetch_type(pool, coll, bucket(prefix, coll), query.id) do
       {:ok, map} ->
         [map
          |>:riakc_map.value
          |> crdt_to_map
-         |> Map.merge(%{id: query.id, context: %{map: map, total_count: 1}})]
+         |> Map.merge(%{id: query.id, context: {map, 1}})]
       {:error, :not_found} ->
         []
     end
@@ -32,33 +35,19 @@ defmodule Riak.Ecto.Connection do
     _projection = query.projection
     opts        = query.opts ++ opts
     filter      = query.filter
+    prefix      = query.prefix
     order       = query.order
     query       = query.query
 
     opts = [{:filter, filter} | opts] ++ [{:sort, order}]
 
-    case Riak.search(pool, coll, query, opts) do
+    case Riak.search(pool, coll, bucket(prefix, coll), query, opts) do
       {:ok, {results, total_count}} ->
         Enum.map(results, fn result ->
           result
           |> solr_to_map
-          |> Map.merge(%{context: %{map: nil, total_count: total_count}})
+          |> Map.merge(%{context: {nil, total_count}})
         end)
-    end
-  end
-
-  def all(pool, %CountQuery{} = query, opts) do
-    coll        = query.coll
-    _projection = query.projection
-    opts        = query.opts ++ opts
-    filter      = query.filter
-    query       = "*:*" #query.query
-
-    opts = [filter: filter, rows: 0, start: 0] ++ opts
-
-    case Riak.search(pool, coll, query, opts) do
-      {:ok, {_, total_count}} ->
-        [%{"value" => total_count}]
     end
   end
 
@@ -194,32 +183,34 @@ defmodule Riak.Ecto.Connection do
   end
 
   def update(pool,  %WriteQuery{} = query, opts) do
-    coll    = query.coll
-    command = query.command
-    context = query.context || %{}
-    _       = query.opts ++ opts
-    query   = query.query
+    coll     = query.coll
+    command  = query.command
+    prefix   = query.prefix
+    {map, _} = query.context || {nil, nil}
+    _        = query.opts ++ opts
+    query    = query.query
 
-    map = apply_changes(Map.get(context, :map), Dict.fetch!(command, :set))
+    map = apply_changes(map, Dict.fetch!(command, :set))
     op  =  :riakc_map.to_op(map)
 
-    case Riak.update_type(pool, coll, query[:id], op) do
+    case Riak.update_type(pool, coll, bucket(prefix, coll), query[:id], op) do
       :ok -> {:ok, []}
       _   -> {:error, :stale}
     end
   end
 
   def insert(pool, %WriteQuery{} = query, opts) do
-    coll    = query.coll
-    command = query.command
-    context = query.context || %{}
-    _       = query.opts ++ opts
+    coll     = query.coll
+    command  = query.command
+    {map, _} = query.context || {nil, nil}
+    prefix   = query.prefix
+    _        = query.opts ++ opts
 
-    id = command[:id] || :undefined
+    id = command[:id]
 
-    map = apply_changes(Map.get(context, :map), command)
+    map = apply_changes(map, command)
 
-    case Riak.update_type(pool, coll, id, :riakc_map.to_op(map)) do
+    case Riak.update_type(pool, coll, bucket(prefix, coll), id, :riakc_map.to_op(map)) do
       :ok       -> {:ok, 1}
       {:ok, id} -> {:ok, %{inserted_id: id}}
     end
@@ -227,13 +218,13 @@ defmodule Riak.Ecto.Connection do
 
   def delete(pool, %WriteQuery{} = query, opts) do
     coll     = query.coll
-    _        = query.context
+    prefix   = query.prefix
     _        = query.opts ++ opts
     query    = query.query
 
     id = Dict.fetch!(query, :id)
 
-    case Riak.delete(pool, coll, id) do
+    case Riak.delete(pool, coll, bucket(prefix, coll), id) do
       :ok -> {:ok, []}
       _   -> {:error, :stale}
     end

@@ -1,5 +1,5 @@
 defmodule Riak.Ecto do
-
+require Logger
   @moduledoc """
   Adapter module for Riak, using a map bucket_type to store models.
   It uses `riakc` for communicating with the database and manages
@@ -13,7 +13,6 @@ defmodule Riak.Ecto do
   alias Riak.Ecto.NormalizedQuery
   alias Riak.Ecto.NormalizedQuery.SearchQuery
   alias Riak.Ecto.NormalizedQuery.FetchQuery
-  alias Riak.Ecto.NormalizedQuery.CountQuery
   alias Riak.Ecto.NormalizedQuery.WriteQuery
   alias Riak.Ecto.Decoder
   alias Riak.Ecto.Connection
@@ -48,12 +47,16 @@ defmodule Riak.Ecto do
 
   @doc false
   def stop(repo, _pid, _timeout \\ 5_000) do
-    repo.__riak_pool.stop
+    repo.__riak_pool__.stop
   end
 
   @doc false
+  def load(_type, nil),
+    do: {:ok, nil}
   def load(:binary_id, data),
     do: Ecto.Type.load(:string, data, &load/2)
+  def load(:map, keyword),
+    do: {:ok, Enum.into(keyword, %{})}
   def load(Ecto.DateTime, data) when is_binary(data) do
     case Ecto.DateTime.cast(data) do
       {:ok, datetime} ->
@@ -71,13 +74,10 @@ defmodule Riak.Ecto do
     end
   end
 
-  def load(Riak.Ecto.Counter, data) do
-    Ecto.Type.load(Riak.Ecto.Counter, data, &load/2)
-  end
-
-  def load(Riak.Ecto.Set, data) do
-    Ecto.Type.load(Riak.Ecto.Set, data, &load/2)
-  end
+  def load(Riak.Ecto.Counter, data),
+    do: Ecto.Type.load(Riak.Ecto.Counter, data, &load/2)
+  def load(Riak.Ecto.Set, data),
+    do: Ecto.Type.load(Riak.Ecto.Set, data, &load/2)
 
   def load(:float, data) when is_binary(data),
     do: Ecto.Type.load(:float, String.to_float(data), &load/2)
@@ -104,11 +104,12 @@ defmodule Riak.Ecto do
     Ecto.Type.load(type, data, &load/2)
   end
 
-  def load(type, data) do
-    Ecto.Type.load(type, data, &load/2)
-  end
+  def load(type, data),
+    do: Ecto.Type.load(type, data, &load/2)
 
   @doc false
+  def dump(_type, nil),
+    do: {:ok, nil}
   def dump(:binary_id, data),
     do: Ecto.Type.dump(:string, data, &dump/2)
   def dump(:float, data) when is_float(data),
@@ -124,7 +125,7 @@ defmodule Riak.Ecto do
   end
 
   @doc false
-  def embed_id(_), do: Flaky.alpha
+  def embed_id(_), do: Riak.Ecto.Utils.unique_id_62
 
   @doc false
   def prepare(function, query) do
@@ -144,7 +145,7 @@ defmodule Riak.Ecto do
 
   def execute(repo, _meta, {function, query}, params, preprocess, opts) do
     case apply(NormalizedQuery, function, [query, params]) do
-      %{__struct__: read} = query when read in [FetchQuery, SearchQuery, CountQuery] ->
+      %{__struct__: read} = query when read in [FetchQuery, SearchQuery] ->
         {rows, count} =
           Connection.all(repo.__riak_pool__, query, opts)
           |> Enum.map_reduce(0, &{process_document(&1, query, preprocess), &2 + 1})
@@ -156,11 +157,11 @@ defmodule Riak.Ecto do
   end
 
   @doc false
-  def insert(_repo, meta, _params, {key, :id, _}, _returning, _opts) do
-    raise ArgumentError,
-      "Riak adapter does not support :id field type in models. " <>
-      "The #{inspect key} field in #{inspect meta.model} is tagged as such."
-  end
+ def insert(_repo, meta, _params, {key, :id, _}, _returning, _opts) do
+   raise ArgumentError,
+     "Riak adapter does not support :id field type in models. " <>
+     "The #{inspect key} field in #{inspect meta.model} is tagged as such."
+ end
 
   def insert(_repo, meta, _params, _autogen, [_] = returning, _opts) do
     raise ArgumentError,
@@ -225,6 +226,11 @@ defmodule Riak.Ecto do
     Connection.update(repo.__riak_pool__, normalized, opts)
   end
 
+  def update(repo, meta, fields, [id: pk] = filter, nil, [], opts) do
+    normalized = NormalizedQuery.update(meta, fields, filter, pk)
+    Connection.update(repo.__riak_pool__, normalized, opts)
+  end
+
   @doc false
   def delete(_repo, meta, _filter, {key, :id, _}, _opts) do
     raise ArgumentError,
@@ -234,7 +240,11 @@ defmodule Riak.Ecto do
 
   def delete(repo, meta, filter, {pk, :binary_id, _value}, opts) do
     normalized = NormalizedQuery.delete(meta.source, meta.context, filter, pk)
+    Connection.delete(repo.__riak_pool__, normalized, opts)
+  end
 
+  def delete(repo, meta, [id: pk] = filter, nil, opts) do
+    normalized = NormalizedQuery.delete(meta.source, meta.context, filter, pk)
     Connection.delete(repo.__riak_pool__, normalized, opts)
   end
 
@@ -265,17 +275,17 @@ defmodule Riak.Ecto do
   defp format_log(_entry, :run_command, [command, _opts]) do
     ["COMMAND " | inspect(command)]
   end
-  defp format_log(_entry, :fetch_type, [bucket, id, _opts]) do
-    ["FETCH_TYPE", format_part("bucket", bucket), format_part("id", id)]
+  defp format_log(_entry, :fetch_type, [bucket_type, bucket, id, _opts]) do
+    ["FETCH_TYPE", format_part("bucket_type", bucket_type), format_part("bucket", bucket), format_part("id", id)]
   end
-  defp format_log(_entry, :update_type, [bucket, id, _opts]) do
-    ["UPDATE_TYPE", format_part("bucket", bucket), format_part("id", id)]
+  defp format_log(_entry, :update_type, [bucket_type, bucket, id, _opts]) do
+    ["UPDATE_TYPE", format_part("bucket_type", bucket_type), format_part("bucket", bucket), format_part("id", id)]
   end
-  defp format_log(_entry, :search, [index, filter, _opts]) do
-    ["SEARCH", format_part("index", index), format_part("filter", filter)]
+  defp format_log(_entry, :search, [index, bucket, filter, _opts]) do
+    ["SEARCH", format_part("index", index), format_part("bucket", bucket), format_part("filter", filter)]
   end
-  defp format_log(_entry, :delete, [coll, filter, _opts]) do
-    ["DELETE", format_part("coll", coll), format_part("filter", filter),
+  defp format_log(_entry, :delete, [bucket_type, bucket, filter, _opts]) do
+    ["DELETE", format_part("bucket_type", bucket_type), format_part("bucket", bucket), format_part("filter", filter),
      format_part("many", false)]
   end
 

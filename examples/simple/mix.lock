@@ -1,7 +1,7 @@
-%{"decimal": {:hex, :decimal, "1.1.0"},
-  "flaky": {:git, "https://github.com/pma/flaky.git", "4781a0a6d6ae32d9fb61f7c8f27faefd2ddb9d3d", []},
+%{"decimal": {:hex, :decimal, "1.1.1"},
+  "hamcrest": {:git, "https://github.com/hyperthunk/hamcrest-erlang.git", "908a24fda4a46776a5135db60ca071e3d783f9f6", [branch: "master"]},
   "meck": {:git, "git://github.com/basho/meck.git", "dde759050eff19a1a80fd854d7375174b191665d", [tag: "0.8.2"]},
   "poolboy": {:hex, :poolboy, "1.5.1"},
-  "protobuffs": {:git, "git://github.com/basho/erlang_protobuffs.git", "f88fc3c6881687432ddd5546b3c7b08009dfb26f", [tag: "0.8.1p5"]},
-  "riak_pb": {:git, "git://github.com/basho/riak_pb", "620bc7001dc788e5530078aa8be53c9d15d4fdb4", [tag: "2.1.0.2"]},
-  "riakc": {:git, "https://github.com/basho/riak-erlang-client.git", "1e59b03d2ce827714d25cb50b4bca98fbea4e170", []}}
+  "protobuffs": {:git, "git://github.com/basho/erlang_protobuffs.git", "a1eeee77aef639a33cc5a2dd7abed7e4f4b83f9b", [tag: "0.8.2"]},
+  "riak_pb": {:git, "git://github.com/basho/riak_pb", "eacf4404625de69f7b3908cebd8efe416d9598b0", [tag: "2.1.0.7"]},
+  "riakc": {:git, "https://github.com/basho/riak-erlang-client.git", "527722d12d0433b837cdb92a60900c2cb5df8942", []}}
