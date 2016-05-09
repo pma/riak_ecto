@@ -64,19 +64,19 @@ defmodule Riak.Pool do
         @adapter.run(@name, fun)
       end
 
-      def log(return, queue_time, query_time, _fun, _args) do
-        return
-      end
+#      def log(return, queue_time, query_time, _fun, _args) do
+#        return
+#      end
 
-      defoverridable [log: 5]
+#      defoverridable [log: 5]
     end
   end
 
   @type time :: integer
 
   defcallback run((pid -> return)) :: {queue_time :: time, return} when return: var
-  defcallback log(return, queue_time, query_time, fun :: atom, args :: list) ::
-    return when return: var, queue_time: time, query_time: time
+#  defcallback log(return, queue_time, query_time, fun :: atom, args :: list) ::
+#    return when return: var, queue_time: time, query_time: time
 
   def run_with_log(pool, log, args, opts, fun) do
     {log?, opts} = Keyword.pop(opts, :log, true)
@@ -85,7 +85,7 @@ defmodule Riak.Pool do
       {queue_time, {query_time, value}} =
         pool.run(&:timer.tc(fun, [&1]))
 
-      pool.log(value, queue_time, query_time, log, args ++ [opts])
+ #     pool.log(value, queue_time, query_time, log, args ++ [opts])
       value
     else
       {_queue_time, value} = pool.run(fun)

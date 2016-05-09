@@ -1,5 +1,6 @@
 defmodule Riak.Ecto.Encoder do
   @moduledoc false
+  require Logger
 
   import Riak.Ecto.Utils
   alias Ecto.Query.Tagged
@@ -27,6 +28,10 @@ defmodule Riak.Ecto.Encoder do
     do: {:ok, string}
   def encode(boolean, _pk) when is_boolean(boolean),
     do: {:ok, boolean}
+  def encode(integer, _pk) when is_integer(integer),
+    do: {:ok, to_string(integer)}
+  def encode(float, _pk) when is_float(float),
+    do: {:ok, to_string(float)}
   def encode(nil, _pk) do
     {:ok, nil}
   end
@@ -55,7 +60,8 @@ defmodule Riak.Ecto.Encoder do
     iso8601 = Ecto.DateTime.from_erl({date, {hour, min, sec}}) |> Ecto.DateTime.to_iso8601
     {:ok, iso8601}
   end
-  def encode(_value, _pk) do
+  def encode(value, _pk) do
+    Logger.debug inspect(value)
     :error
   end
 

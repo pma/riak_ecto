@@ -75,7 +75,9 @@ defmodule Riak.Connection do
   end
 
   def handle_call({:search, index, bucket, query, opts}, _from, s) do
-    opts = Keyword.update!(opts, :filter,
+    opts = opts
+    |> Keyword.put_new(:filter, "")
+    |> Keyword.update!(:filter,
       fn "" -> "_yz_rb:#{bucket}"
          v  -> "_yz_rb:#{bucket} AND (#{v})"
       end)

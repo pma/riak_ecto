@@ -4,30 +4,22 @@ defmodule Riak.Ecto.NormalizedQuery do
   defmodule SearchQuery do
     @moduledoc false
 
-    defstruct coll: nil, pk: nil, params: {}, query: %{},
-              model: nil, filter: "", fields: [], order: nil,
-              prefix: nil,
-              projection: %{}, opts: []
+    defstruct prefix: nil, source: nil, pk: nil, params: nil,
+              struct: nil,
+              filter_query: nil, normal_query: nil,
+              projection: nil, fields: nil, order: nil,
+              opts: nil
   end
 
   defmodule FetchQuery do
     @moduledoc false
 
-    defstruct coll: nil, pk: nil, id: nil, fields: [],
-              prefix: nil,
-              model: nil, projection: %{}, opts: []
-  end
-
-  defmodule WriteQuery do
-    @moduledoc false
-
-    defstruct coll: nil, query: %{}, command: %{},
-              filter: nil, prefix: nil,
-              model: nil, context: nil, opts: []
+    defstruct prefix: nil, source: nil, pk: nil, id: nil,
+              struct: nil,
+              projection: nil, fields: [], opts: []
   end
 
   alias Riak.Ecto.Encoder
-  alias Ecto.Query.Tagged
   alias Ecto.Query
 
   defmacrop is_op(op) do
@@ -37,105 +29,60 @@ defmodule Riak.Ecto.NormalizedQuery do
   end
 
   def all(%Query{} = original, params) do
+
     check_query(original)
 
     from   = from(original)
     params = List.to_tuple(params)
-    {filter, order} = filter_order(original, params, from)
 
-    case projection(original, params, from) do
+    case projection(original) do
       {projection, fields} ->
-        case filter do
+        case filter(original, params, from) do
           {:fetch, id} ->
             find_one(original, id, projection, fields, params, from)
           {:search, filter} ->
+            order = order(original, from)
             find_all(original, "*:*", filter, order, projection, fields, params, from)
         end
     end
+
   end
 
-  defp find_all(original, query, filter, order, projection, fields, params, {coll, model, pk}) do
+  defp find_all(original, query, filter, order, projection, fields, params, {source, struct, pk}) do
     opts = opts(:find_all, original, params, pk)
 
-    %SearchQuery{coll: coll, pk: pk, params: params, query: query, projection: projection,
-                 opts: opts, filter: filter, order: order, fields: fields, model: model,
-                 prefix: original.prefix}
+    %SearchQuery{prefix: original.prefix, source: source, pk: pk, params: params,
+                 struct: struct,
+                 normal_query: query, filter_query: filter, projection: projection,
+                 fields: fields, order: order, opts: opts}
   end
 
-  defp find_one(original, id, projection, fields, params, {coll, model, pk}) do
+  defp find_one(original, id, projection, fields, params, {source, struct, pk}) do
     opts = opts(:find_one, original, params, pk)
 
-    %FetchQuery{coll: coll, pk: pk, projection: projection, id: id, fields: fields,
-                opts: opts, model: model, prefix: original.prefix}
-  end
-
-  def update(%{source: {prefix, coll}, model: model, context: context}, values, filter, pk) do
-    command = command(:update, values, pk)
-    query   = query(filter, pk)
-
-    %WriteQuery{coll: coll, query: query, command: command, context: context, model: model, prefix: prefix}
-  end
-
-  def delete({prefix, coll}, context, filter, pk) do
-    query = query(filter, pk)
-
-    %WriteQuery{coll: coll, query: query, context: context, prefix: prefix}
-  end
-
-  def insert(%{source: {prefix, coll}, model: model}, document, pk) do
-    command = command(:insert, document, model.__struct__(), pk)
-
-    %WriteQuery{coll: coll, command: command, prefix: prefix}
+    %FetchQuery{prefix: original.prefix, source: source,
+                struct: struct,
+                pk: pk, projection: projection, fields: fields, id: id, opts: opts}
   end
 
   defp from(%Query{from: {coll, model}}) do
     {coll, model, primary_key(model)}
   end
 
-  defp filter_order(original, params, from) do
-    filter = filter(original, params, from)
-    order  = order(original, from)
-    {filter, order}
+  defp projection(%Query{select: %Query.SelectExpr{fields: fields}} = query) do
+    projection(fields, query, fields, [])
   end
 
-  defp projection(%Query{select: nil}, _params, _from),
-    do: {%{}, []}
-  defp projection(%Query{select: %Query.SelectExpr{fields: fields}} = query, params, from),
-    do: projection(fields, params, from, query, %{}, [])
-
-  defp projection([], _params, _from, _query, pacc, facc),
-    do: {pacc, Enum.reverse(facc)}
-  defp projection([{:&, _, [0]} = field | rest], params, {_, model, pk} = from, query, pacc, facc)
-  when  model != nil do
-    pacc = Enum.into(model.__schema__(:types), pacc, fn {field, ecto_type} ->
-      {field(field, pk), riak_type(ecto_type)}
-    end)
-    facc = [field | facc]
-
-    projection(rest, params, from, query, pacc, facc)
+  defp projection([], _query, projection, facc) do
+    {projection, facc |> Enum.reverse |> List.flatten}
   end
-  defp projection([{:&, _, [0]} = field | rest], params, {_, nil, _} = from, query, _pacc, facc) do
-    # Model is nil, we want empty projection, but still extract fields
-    {_, facc} = projection(rest, params, from, query, %{}, [field | facc])
-    {%{}, facc}
-  end
-  defp projection([{op, _, _} | _rest], _params, _from, query, _pacc, _facc) when is_op(op) do
-    error(query, "select clause")
-  end
-  # We skip all values and then add them when constructing return result
-  defp projection([%Tagged{value: {:^, _, [idx]}} = field | rest], params, from, query, pacc, facc) do
-    {_, _, pk} = from
-    value = params |> elem(idx) |> value(params, pk, query, "select clause")
-    facc = [{:value, value, field} | facc]
 
-    projection(rest, params, from, query, pacc, facc)
+  defp projection([{:&, _, [_ix, fields, _]} | rest], query, projection, facc) do
+    projection(rest, query, projection, [fields | facc])
   end
-  defp projection([field | rest], params, from, query, pacc, facc) do
-    {_, _, pk} = from
-    value = value(field, params, pk, query, "select clause")
-    facc = [{:value, value, field} | facc]
 
-    projection(rest, params, from, query, pacc, facc)
+  defp projection([{{:., _, [{:&, _, [_]}, field]}, _, []} | rest], query, projection, facc) do
+    projection(rest, query, projection, [field | facc])
   end
 
   defp opts(:find_all, query, params, pk),
@@ -169,10 +116,6 @@ defmodule Riak.Ecto.NormalizedQuery do
     {:search, search}
   end
 
-  defp query(filter, pk) do
-    filter |> value(pk, "where clause") |> map_unless_empty
-  end
-
   defp order(%Query{order_bys: order_bys} = query, {_coll, model, pk}) do
     order_bys
     |> Enum.flat_map(fn %Query.QueryExpr{expr: expr} ->
@@ -181,22 +124,6 @@ defmodule Riak.Ecto.NormalizedQuery do
     |> Enum.intersperse([","])
     |> IO.iodata_to_binary
   end
-
-  defp command(:insert, document, struct, pk) do
-    document
-    |> Enum.reject(fn {key, value} -> both_nil(value, Map.get(struct, key)) end)
-    |> value(pk, "insert command") |> map_unless_empty
-  end
-
-  defp command(:update, values, pk) do
-    [set: values |> value(pk, "update command") |> map_unless_empty]
-  end
-
-  defp both_nil(nil, nil), do: true
-  defp both_nil( %Ecto.Query.Tagged{tag: nil, value: nil}, nil), do: true
-  defp both_nil([], []), do: true
-  defp both_nil(false, _), do: true
-  defp both_nil(_, _), do: false
 
   defp offset_limit(nil, _, _, _),
     do: nil
@@ -238,13 +165,6 @@ defmodule Riak.Ecto.NormalizedQuery do
   defp check(_, _, query, message),
     do: raise(Ecto.QueryError, query: query, message: message)
 
-  defp value(expr, pk, place) do
-    case Encoder.encode(expr, pk) do
-      {:ok, value} -> value
-      :error       -> error(place)
-    end
-  end
-
   defp value(expr, params, pk, query, place) do
     case Encoder.encode(expr, params, pk) do
       {:ok, value} -> value
@@ -255,32 +175,8 @@ defmodule Riak.Ecto.NormalizedQuery do
   defp escaped_value(expr, params, pk, query, place),
     do: value(expr, params, pk, query, place) |> to_string |> escape_value
 
-  defp field(pk, pk), do: :id
-  defp field(key, _), do: key
-
-  defp field(pk, _, pk), do: "_yz_rk"
-  defp field(key, type, _), do: [Atom.to_string(key), '_', Atom.to_string(type)]
-
-  defp field({{:., _, [{:&, _, [0]}, field]}, _, []}, model, pk, _query, _place) do
-    type = model.__schema__(:type, field) |> riak_type
-    field(field, type, pk)
-  end
-
   defp field(_expr, _model, _pk, query, place),
     do: error(query, place)
-
-  defp riak_type(:string),    do: :register
-  defp riak_type(:integer),   do: :register
-  defp riak_type(:float),     do: :register
-  defp riak_type(:binary_id), do: :register
-  defp riak_type(:id),        do: :register
-
-  defp riak_type(:boolean),   do: :flag
-
-  defp riak_type(_),          do: :register
-
-  defp map_unless_empty([]),   do: %{}
-  defp map_unless_empty(list), do: list
 
   {:ok, pattern} = :re.compile(~S"[:;~^\"!*+\-&\?()\][}{\\\|\s#]", [:unicode])
   @escape_pattern pattern
@@ -365,9 +261,6 @@ defmodule Riak.Ecto.NormalizedQuery do
   defp error(query, place) do
     raise Ecto.QueryError, query: query,
       message: "1) Invalid expression for Riak adapter in #{place}"
-  end
-  defp error(place) do
-    raise ArgumentError, "2) Invalid expression for Riak adapter in #{place}"
   end
 
 end

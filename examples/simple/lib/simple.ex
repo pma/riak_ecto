@@ -25,18 +25,19 @@ defmodule Weather do
     field :temp_lo, :integer
     field :temp_hi, :integer
     field :expiry_date, Ecto.Date
+    field :expiry_datetime, Ecto.DateTime
     field :active, :boolean
     field :prcp, :float, default: 0.0
     field :map, :map
 
-    field :counter, Riak.Ecto.Counter
-    field :set, Riak.Ecto.Set
+#    field :counter, Riak.Ecto.Counter
+#    field :set, Riak.Ecto.Set
 
     field :list, {:array, :integer}
-
+#
     embeds_one :item, Item, on_replace: :delete
     embeds_many :items, Item
-
+#
     timestamps
   end
 end

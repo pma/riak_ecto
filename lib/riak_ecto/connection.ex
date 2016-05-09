@@ -1,63 +1,91 @@
 defmodule Riak.Ecto.Connection do
+  require Logger
   @moduledoc false
 
   alias Riak.Ecto.NormalizedQuery.SearchQuery
   alias Riak.Ecto.NormalizedQuery.FetchQuery
-  alias Riak.Ecto.NormalizedQuery.WriteQuery
 
   ## Worker
 
   ## Callbacks for adapter
 
-  defp bucket(nil, coll), do: coll
+  defp bucket(nil, source), do: source
   defp bucket(prefix, _), do: prefix
 
   def all(pool, query, opts \\ [])
 
   def all(pool, %FetchQuery{} = query, _opts) do
-    coll        = query.coll
     prefix      = query.prefix
-    _projection = query.projection
+    source      = query.source
+    fields      = query.fields
 
-    case Riak.fetch_type(pool, coll, bucket(prefix, coll), query.id) do
+    case Riak.fetch_type(pool, source, bucket(prefix, source), query.id) do
       {:ok, map} ->
-        [map
-         |>:riakc_map.value
-         |> crdt_to_map
-         |> Map.merge(%{id: query.id, context: {map, 1}})]
+        [{{1, map},
+          map
+          |>:riakc_map.value
+          |> crdt_to_map
+          |> project_fields(fields)}]
       {:error, :not_found} ->
         []
     end
   end
 
   def all(pool, %SearchQuery{} = query, opts) do
-    coll        = query.coll
-    _projection = query.projection
-    opts        = query.opts ++ opts
-    filter      = query.filter
     prefix      = query.prefix
+    source      = query.source
+    struct      = query.struct
+    pk          = query.pk
+    fields      = query.fields
+    opts        = query.opts ++ opts
+    filter      = query.filter_query
     order       = query.order
-    query       = query.query
+    query       = query.normal_query
 
-    opts = [{:filter, filter} | opts] ++ [{:sort, order}]
+    fl = fields
+    |> Stream.map(&field_name_ecto_to_solr(&1, pk, struct))
+    |> Enum.join(" ")
 
-    case Riak.search(pool, coll, bucket(prefix, coll), query, opts) do
+    opts = [filter: filter, sort: order, fl: fl] ++ opts
+
+    case Riak.search(pool, source, bucket(prefix, source), query, opts) do
       {:ok, {results, total_count}} ->
         Enum.map(results, fn result ->
-          result
-          |> solr_to_map
-          |> Map.merge(%{context: {nil, total_count}})
+          {{total_count, nil},
+           result
+           |> solr_to_map
+           |> project_fields(fields)}
         end)
     end
   end
 
+  defp project_fields(map, fields) do
+    Enum.map(fields, &Map.get(map, Atom.to_string(&1)))
+  end
+
+  def field_name_ecto_to_solr(pk, pk, _struct),
+    do: "_yz_rk"
+  def field_name_ecto_to_solr(field, _pk, struct) do
+    riak_type =
+      case Ecto.Type.type(struct.__schema__(:type, field)) do
+        register when register in [:string, :integer, :float, :decimal, :date, :datetime, :binary_id] ->
+          "register"
+        :boolean    -> "flag"
+        :map        -> "map.*"
+        {:embed, _} -> "map.*"
+        {:array, _} -> "map.*"
+      end
+
+    Atom.to_string(field) <> "_" <> riak_type
+  end
+
   defp crdt_to_map(values) do
     Enum.reduce(values, %{}, fn
-      {{k, :flag}, v}, m     -> Dict.put(m, k, v)
       {{k, :register}, v}, m -> Dict.put(m, k, v)
+      {{k, :map}, v}, m      -> Dict.put(m, k, crdt_to_map((v)))
+      {{k, :flag}, v}, m     -> Dict.put(m, k, v)
       {{k, :counter}, v}, m  -> Dict.put(m, k, {:counter, v})
       {{k, :set}, v}, m      -> Dict.put(m, k, {:set, v})
-      {{k, :map}, v}, m      -> Dict.put(m, k, crdt_to_map((v)))
     end)
   end
 
@@ -65,7 +93,7 @@ defmodule Riak.Ecto.Connection do
   defp solr_to_map({_, fields}) do
     Enum.reduce(fields, %{}, fn
       {field, _}, map when field in @ignore_fields -> map
-      {"_yz_rk", value}, map                       -> Dict.put(map, :id, value)
+      {"_yz_rk", value}, map                       -> Dict.put(map, "id", value)
       {key, value}, map                            -> map_solr_field(key, value, map)
     end)
   end
@@ -105,7 +133,13 @@ defmodule Riak.Ecto.Connection do
 
   defp apply_change(map, {key, false}) do
     map = erase_key_unless_type(map, key, [:flag])
-    :riakc_map.update({key, :flag}, &:riakc_flag.disable(&1), map)
+    :riakc_map.update({key, :flag}, fn flag ->
+      try do
+        :riakc_flag.disable(flag)
+      catch
+        :context_required -> flag
+      end
+    end, map)
   end
 
   defp apply_change(map, {k, true}) do
@@ -115,7 +149,7 @@ defmodule Riak.Ecto.Connection do
 
   defp apply_change(map, {k, value}) when is_binary(value) do
     map = erase_key_unless_type(map, k, [:register])
-    :riakc_map.update({k, :register}, &:riakc_register.set(value, &1), map)
+    :riakc_map.update({k, :register}, &:riakc_register.set(to_string(value), &1), map)
   end
 
   defp apply_change(map, {k, {:counter, _value, increment}}) do
@@ -152,82 +186,36 @@ defmodule Riak.Ecto.Connection do
     end, crdt_map)
   end
 
-  defp apply_change(crdt_map, {key, [%{id: _id} | _] = value_list}) when is_list(value_list) do
-    crdt_map = erase_key_unless_type(crdt_map, key, [:map])
-
-    crdt_map =
-      :riakc_map.update({key, :map}, fn inner_crdt_map ->
-        ids = Enum.map(value_list, &Map.fetch!(&1, :id)) |> Enum.map(&to_string/1)
-        Enum.reduce(:riakc_map.fetch_keys(inner_crdt_map), inner_crdt_map, fn {k, dt}, acc ->
-          if(k in ids, do: acc, else: :riakc_map.erase({k, dt}, acc))
-        end)
-      end, crdt_map)
-
-    Enum.reduce(value_list, crdt_map, fn %{id: id} = item, acc ->
-      item = Map.delete(item, :id)
-      :riakc_map.update({key, :map}, &apply_change(&1, {to_string(id), item}), acc)
-    end)
-  end
-
-  defp apply_change(crdt_map, {key, value_list}) when is_list(value_list) do
-    crdt_map = erase_key_unless_type(crdt_map, key, [:map])
-    Enum.reduce(value_list, crdt_map, fn item, acc ->
-      :riakc_map.update({key, :map}, &apply_change(&1, {to_string(:erlang.phash2(item)), item}), acc)
-    end)
-  end
-
   defp apply_changes(crdt_map, updates) do
     Enum.reduce(updates, crdt_map || :riakc_map.new, fn {key, new_value}, acc ->
       apply_change(acc, {to_string(key), new_value})
     end)
   end
 
-  def update(pool,  %WriteQuery{} = query, opts) do
-    coll     = query.coll
-    command  = query.command
-    prefix   = query.prefix
-    {map, _} = query.context || {nil, nil}
-    _        = query.opts ++ opts
-    query    = query.query
+  def insert(pool, prefix, source, params, _options) do
+    map = apply_changes(nil, params)
+    bucket = bucket(prefix, source)
 
-    map = apply_changes(map, Dict.fetch!(command, :set))
-    op  =  :riakc_map.to_op(map)
+    case Riak.update_type(pool, source, bucket, Keyword.get(params, :id), :riakc_map.to_op(map)) do
+      :ok       -> {:ok, []}
+      {:ok, id} -> {:ok, [id: id]}
+    end
+  end
 
-    case Riak.update_type(pool, coll, bucket(prefix, coll), query[:id], op) do
+  def update(pool, prefix, source, {_, map} = _context, id, params, _options) do
+    map = apply_changes(map, params)
+    bucket = bucket(prefix, source)
+
+    case Riak.update_type(pool, source, bucket, id, :riakc_map.to_op(map)) do
+      :ok       -> {:ok, []}
+      _         -> {:error, :stale}
+    end
+  end
+
+  def delete(pool, prefix, source, id, _options) do
+    case Riak.delete(pool, source, bucket(prefix, source), id) do
       :ok -> {:ok, []}
       _   -> {:error, :stale}
     end
   end
-
-  def insert(pool, %WriteQuery{} = query, opts) do
-    coll     = query.coll
-    command  = query.command
-    {map, _} = query.context || {nil, nil}
-    prefix   = query.prefix
-    _        = query.opts ++ opts
-
-    id = command[:id]
-
-    map = apply_changes(map, command)
-
-    case Riak.update_type(pool, coll, bucket(prefix, coll), id, :riakc_map.to_op(map)) do
-      :ok       -> {:ok, 1}
-      {:ok, id} -> {:ok, %{inserted_id: id}}
-    end
-  end
-
-  def delete(pool, %WriteQuery{} = query, opts) do
-    coll     = query.coll
-    prefix   = query.prefix
-    _        = query.opts ++ opts
-    query    = query.query
-
-    id = Dict.fetch!(query, :id)
-
-    case Riak.delete(pool, coll, bucket(prefix, coll), id) do
-      :ok -> {:ok, []}
-      _   -> {:error, :stale}
-    end
-  end
-
 end

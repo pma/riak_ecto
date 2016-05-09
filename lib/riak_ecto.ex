@@ -1,5 +1,4 @@
 defmodule Riak.Ecto do
-require Logger
   @moduledoc """
   Adapter module for Riak, using a map bucket_type to store models.
   It uses `riakc` for communicating with the database and manages
@@ -11,10 +10,6 @@ require Logger
   @behaviour Ecto.Adapter
 
   alias Riak.Ecto.NormalizedQuery
-  alias Riak.Ecto.NormalizedQuery.SearchQuery
-  alias Riak.Ecto.NormalizedQuery.FetchQuery
-  alias Riak.Ecto.NormalizedQuery.WriteQuery
-  alias Riak.Ecto.Decoder
   alias Riak.Ecto.Connection
 
   ## Adapter
@@ -29,13 +24,18 @@ require Logger
       defmodule Pool do
         use Riak.Pool, name: __MODULE__, adapter: unquote(adapter)
 
-        def log(return, queue_time, query_time, fun, args) do
-          Riak.Ecto.log(unquote(module), return, queue_time, query_time, fun, args)
-        end
+#        def log(return, queue_time, query_time, fun, args) do
+#          Riak.Ecto.log(unquote(module), return, queue_time, query_time, fun, args)
+#        end
       end
 
       def __riak_pool__, do: unquote(module).Pool
     end
+  end
+
+  @doc false
+  def application do
+    Riak.Pool.Poolboy
   end
 
   @doc false
@@ -45,87 +45,136 @@ require Logger
     repo.__riak_pool__.start_link(opts)
   end
 
+  def child_spec(repo, opts) do
+    Supervisor.Spec.worker(__MODULE__, [repo,opts], [])
+  end
+
+  @doc false
+  def autogenerate(:binary_id), do: Riak.Ecto.Utils.unique_id_62
+  def autogenerate(:embed_id), do: Riak.Ecto.Utils.unique_id_62
+  def autogenerate(:id) do
+    raise ArgumentError,
+      "Riak adapter does not support :id field type in struct."
+  end
+
+  @doc false
+  def loaders(:date, type), do: [&date_decode/1, type]
+  def loaders(:datetime, type), do: [&datetime_decode/1, type]
+  def loaders(:float, type), do: [&float_decode/1, type]
+  def loaders(:integer, type), do: [&integer_decode/1, type]
+  def loaders({:array, _} = type, _), do: [&load_array(type, &1)]
+  def loaders({:embed, %Ecto.Embedded{cardinality: :many}} = type, _), do: [&load_embed(type, &1)]
+  def loaders(:binary_id, type), do: [:string, type]
+
+  def loaders(_, type), do: [type]
+
+  defp load_embed(type, value) do
+    Ecto.Type.load(type, for({_, v} <- value, into: [], do: v), fn
+      {:embed, _} = type, value -> load_embed(type, value)
+      type, value -> Ecto.Type.cast(type, value)
+    end)
+  end
+
+  defp load_array(type, value) do
+    list = value
+    |> Stream.map(fn {idx, v} -> {String.to_integer(idx), v} end)
+    |> Enum.into([])
+    |> Enum.sort(fn {idx1, _}, {idx2, _} -> idx1 < idx2 end)
+    |> Enum.map(fn {_, v} -> v end)
+
+    Ecto.Type.cast(type, list)
+  end
+
+  defp date_decode(nil), do: {:ok, nil}
+  defp date_decode(iso8601) do
+    case Ecto.Date.cast(iso8601) do
+      {:ok, date} -> {:ok, {date.year, date.month, date.day}}
+      :error      -> :error
+    end
+  end
+
+  defp datetime_decode(nil), do: {:ok, nil}
+  defp datetime_decode(iso8601) do
+    case Ecto.DateTime.cast(iso8601) do
+      {:ok, datetime} -> {:ok, {{datetime.year, datetime.month, datetime.day}, {datetime.hour, datetime.min, datetime.sec, datetime.usec}}}
+      :error          -> :error
+    end
+  end
+
+  defp float_decode(nil), do: {:ok, nil}
+  defp float_decode(string) do
+    case Float.parse(string) do
+      {value, ""} -> {:ok, value}
+      _           -> :error
+    end
+  end
+
+  defp integer_decode(nil), do: {:ok, nil}
+  defp integer_decode(string) do
+    case Integer.parse(string) do
+      {value, ""} -> {:ok, value}
+      _           -> :error
+    end
+  end
+
+  @doc false
+
+  def dumpers(:integer, type), do: [type, &register_encode/1]
+  def dumpers(:float, type), do: [type, &register_encode/1]
+  def dumpers(:date, type), do: [type, &register_encode/1]
+  def dumpers(:datetime, type), do: [type, &register_encode/1]
+
+  def dumpers({:embed, %Ecto.Embedded{cardinality: :many}} = type, _), do: [&dump_embed(type, &1)]
+  def dumpers({:array, _} = type, _), do: [&dump_list(type, &1)]
+  def dumpers(:binary_id, type), do: [type, :string]
+  def dumpers(_, type), do: [type]
+
+  defp dump_embed({:embed, %Ecto.Embedded{cardinality: :many, related: struct}} = type, value) do
+    [pk] = struct.__schema__(:primary_key)
+    Ecto.Type.dump(type, value, fn
+      {:embed, %Ecto.Embedded{cardinality: :many}} = type, value -> dump_embed(type, value)
+      _type, value -> {:ok, value}
+    end)
+    |> case do
+         {:ok, list} ->
+           {:ok, for(el <- list, into: %{}, do: {Map.fetch!(el, pk), el})}
+         other -> other
+       end
+  end
+
+  defp dump_list({:array, _}, value) when is_list(value) do
+    map = value
+    |> Stream.with_index
+    |> Stream.map(fn {idx, v} -> {to_string(v), to_string(idx)} end)
+    |> Enum.into(%{})
+
+    {:ok, map}
+  end
+
+  defp register_encode({_year, _month, _day} = date) do
+    value = date
+    |> Ecto.Date.from_erl
+    |> Ecto.Date.to_iso8601
+
+    {:ok, value}
+  end
+
+  defp register_encode({{year, month, day}, {hour, min, sec}}) do
+    value = {{year, month, day}, {hour, min, sec}}
+    |> Ecto.DateTime.from_erl
+    |> Ecto.DateTime.to_iso8601
+    |> Kernel.<>("Z")
+    {:ok, value}
+  end
+  defp register_encode({{year, month, day}, {hour, min, sec, _}}) do
+    register_encode({{year, month, day}, {hour, min, sec}})
+  end
+  defp register_encode(term), do: {:ok, to_string(term)}
+
   @doc false
   def stop(repo, _pid, _timeout \\ 5_000) do
     repo.__riak_pool__.stop
   end
-
-  @doc false
-  def load(_type, nil),
-    do: {:ok, nil}
-  def load(:binary_id, data),
-    do: Ecto.Type.load(:string, data, &load/2)
-  def load(:map, keyword),
-    do: {:ok, Enum.into(keyword, %{})}
-  def load(Ecto.DateTime, data) when is_binary(data) do
-    case Ecto.DateTime.cast(data) do
-      {:ok, datetime} ->
-        Ecto.Type.load(Ecto.DateTime, Ecto.DateTime.to_erl(datetime), &load/2)
-      :error ->
-        :error
-    end
-  end
-  def load(Ecto.Date, data) when is_binary(data) do
-    case Ecto.Date.cast(data) do
-      {:ok, date} ->
-        Ecto.Type.load(Ecto.Date, Ecto.Date.to_erl(date), &load/2)
-      :error ->
-        :error
-    end
-  end
-
-  def load(Riak.Ecto.Counter, data),
-    do: Ecto.Type.load(Riak.Ecto.Counter, data, &load/2)
-  def load(Riak.Ecto.Set, data),
-    do: Ecto.Type.load(Riak.Ecto.Set, data, &load/2)
-
-  def load(:float, data) when is_binary(data),
-    do: Ecto.Type.load(:float, String.to_float(data), &load/2)
-  def load(:integer, data) when is_binary(data),
-    do: Ecto.Type.load(:integer, String.to_integer(data), &load/2)
-
-  def load({:embed, %Ecto.Embedded{cardinality: :many}} = type, nil),
-    do: Ecto.Type.load(type, nil, &load/2)
-
-  def load({:embed, %Ecto.Embedded{cardinality: :many}} = type, data) do
-    data = Enum.reduce(data, [], fn {k, v}, acc ->
-      [Map.put(v, "id", k) | acc]
-    end)
-    Ecto.Type.load(type, data, &load/2)
-  end
-
-  def load({:array, _} = type, nil),
-    do: Ecto.Type.load(type, nil, &load/2)
-
-  def load({:array, _} = type, data) do
-    data = data
-    |> Enum.into([])
-    |> Enum.map(&elem(&1, 1))
-    Ecto.Type.load(type, data, &load/2)
-  end
-
-  def load(type, data),
-    do: Ecto.Type.load(type, data, &load/2)
-
-  @doc false
-  def dump(_type, nil),
-    do: {:ok, nil}
-  def dump(:binary_id, data),
-    do: Ecto.Type.dump(:string, data, &dump/2)
-  def dump(:float, data) when is_float(data),
-    do: Ecto.Type.dump(:string, String.Chars.Float.to_string(data), &dump/2)
-  def dump(:integer, data) when is_integer(data),
-    do: Ecto.Type.dump(:string, String.Chars.Integer.to_string(data), &dump/2)
-  def dump(Ecto.Date, %Ecto.DateTime{} = data),
-    do: Ecto.Type.dump(:string, Ecto.DateTime.to_iso8601(data), &dump/2)
-  def dump(Ecto.Date, %Ecto.Date{} = data),
-    do: Ecto.Type.dump(:string, Ecto.Date.to_iso8601(data), &dump/2)
-  def dump(type, data) do
-    Ecto.Type.dump(type, data, &dump/2)
-  end
-
-  @doc false
-  def embed_id(_), do: Riak.Ecto.Utils.unique_id_62
 
   @doc false
   def prepare(function, query) do
@@ -133,102 +182,47 @@ require Logger
   end
 
   @doc false
-  def execute(_repo, _meta, {:update_all, _query}, _params, _preprocess, _opts) do
-    raise ArgumentError, "Riak adapter does not support update_all."
-  end
-
-  def execute(_repo, _meta, {:delete_all, _query}, _params, _preprocess, _opts) do
-    raise ArgumentError, "Riak adapter does not support delete_all."
-  end
-
-  @read_queries [SearchQuery, FetchQuery]
-
-  def execute(repo, _meta, {function, query}, params, preprocess, opts) do
-    case apply(NormalizedQuery, function, [query, params]) do
-      %{__struct__: read} = query when read in [FetchQuery, SearchQuery] ->
-        {rows, count} =
-          Connection.all(repo.__riak_pool__, query, opts)
-          |> Enum.map_reduce(0, &{process_document(&1, query, preprocess), &2 + 1})
-        {count, rows}
-      %WriteQuery{} = write ->
-        result = apply(Connection, function, [repo.__riak_pool__, write, opts])
-        {result, nil}
-    end
+  def execute(repo, _meta, {_, {:all, query}}, params, process, opts) do
+    norm_query = NormalizedQuery.all(query, params)
+    {rows, count} =
+      Connection.all(repo.__riak_pool__, norm_query, opts)
+      |> Enum.map_reduce(0, &{process_document(&1, norm_query, process), &2 + 1})
+    {count, rows}
   end
 
   @doc false
- def insert(_repo, meta, _params, {key, :id, _}, _returning, _opts) do
-   raise ArgumentError,
-     "Riak adapter does not support :id field type in models. " <>
-     "The #{inspect key} field in #{inspect meta.model} is tagged as such."
- end
+  def insert(repo, %{source: {prefix, source}}, fields, _returning, options) do
+    Connection.insert(repo.__riak_pool__, prefix, source, fields, options)
+  end
 
-  def insert(_repo, meta, _params, _autogen, [_] = returning, _opts) do
+  def update(_repo, %{context: nil} = meta, _fields, _filter, _, _options) do
     raise ArgumentError,
-      "Riak adapter does not support :read_after_writes in models. " <>
-      "The following fields in #{inspect meta.model} are tagged as such: #{inspect returning}"
-  end
-
-  def insert(repo, meta, params, nil, [], opts) do
-    normalized = NormalizedQuery.insert(meta, params, nil)
-
-    case Connection.insert(repo.__riak_pool__, normalized, opts) do
-      {:ok, _} -> {:ok, []}
-      other    -> other
-    end
-  end
-
-  def insert(repo, meta, params, {pk, :binary_id, nil}, [], opts) do
-    normalized = NormalizedQuery.insert(meta, params, pk)
-
-    case Connection.insert(repo.__riak_pool__, normalized, opts) do
-      {:ok, %{inserted_id: value}} -> {:ok, [{pk, value}]}
-      other -> other
-    end
-  end
-
-  def insert(repo, meta, params, {pk, :binary_id, _value}, [], opts) do
-    normalized = NormalizedQuery.insert(meta, params, pk)
-
-    case Connection.insert(repo.__riak_pool__, normalized, opts) do
-      {:ok, _} -> {:ok, []}
-      other    -> other
-    end
-  end
-
-  @doc false
-  def update(_repo, meta, _fields, _filter, {key, :id, _}, _returning, _opts) do
-    raise ArgumentError,
-      "Riak adapter does not support :id field type in models. " <>
-      "The #{inspect key} field in #{inspect meta.model} is tagged as such."
-  end
-
-  def update(_repo, meta, _fields, _filter, _autogen, [_|_] = returning, _opts) do
-    raise ArgumentError,
-      "Riak adapter does not support :read_after_writes in models. " <>
-      "The following fields in #{inspect meta.model} are tagged as such: #{inspect returning}"
-  end
-
-  def update(_repo, %{context: %{map: nil}} = meta, _fields, _filter, _, _, _opts) do
-    raise ArgumentError,
-      "No causal context in #{inspect meta.model}. " <>
+      "No causal context in #{inspect meta.struct}. " <>
       "Get the model by id before trying to update it."
   end
 
-  def update(_repo, %{context: nil} = meta, _fields, _filter, _, _, _opts) do
+  def update(_repo, meta, _fields, _filter, [_|_] = returning, _options) do
     raise ArgumentError,
-      "No causal context in #{inspect meta.model}. " <>
-      "Get the model by id before trying to update it."
+      "Riak adapter does not support :read_after_writes. " <>
+      "The following fields in #{inspect meta.struct} are tagged as such: #{inspect returning}"
   end
 
-  def update(repo, meta, fields, filter, {pk, :binary_id, _value}, [], opts) do
-    normalized = NormalizedQuery.update(meta, fields, filter, pk)
-    Connection.update(repo.__riak_pool__, normalized, opts)
+  def update(repo, %{source: {prefix, source}, context: context}, fields, [id: id], _returning, options) do
+    Connection.update(repo.__riak_pool__, prefix, source, context, id, fields, options)
   end
 
-  def update(repo, meta, fields, [id: pk] = filter, nil, [], opts) do
-    normalized = NormalizedQuery.update(meta, fields, filter, pk)
-    Connection.update(repo.__riak_pool__, normalized, opts)
+  def update(_repo, _meta, _fields, [_ | _], _, _options) do
+    raise ArgumentError,
+      "Riak adapter only supports updating by id."
+  end
+
+  def delete(repo, %{source: {prefix, source}}, [id: id], options) do
+    Connection.delete(repo.__riak_pool__, prefix, source, id, options)
+  end
+
+  def delete(_repo, _meta, [_ | _], _options) do
+    raise ArgumentError,
+      "Riak adapter only supports deleting by id."
   end
 
   @doc false
@@ -248,17 +242,13 @@ require Logger
     Connection.delete(repo.__riak_pool__, normalized, opts)
   end
 
-  defp process_document(document, %{fields: fields, pk: pk}, preprocess) do
-    document = Decoder.decode_document(document, pk)
+  def insert_all(_, _, _, _, _, _) do
+    raise ArgumentError,
+      "Riak adapter does not support insert_all."
+  end
 
-    Enum.map(fields, fn
-      {:field, name, field} ->
-        preprocess.(field, Map.get(document, Atom.to_string(name)), document[:context])
-      {:value, value, field} ->
-        preprocess.(field, Decoder.decode_value(value, pk), document[:context])
-      field ->
-        preprocess.(field, document, document[:context])
-    end)
+  def process_document({context, document}, %{projection: projection, pk: _pk}, process) do
+    Enum.map(projection, &process.(&1, document, context))
   end
 
   @doc false
