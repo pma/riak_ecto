@@ -1,5 +1,5 @@
 defmodule Riak.Ecto.NormalizedQuery do
-  @moduledoc false
+ @moduledoc false
 
   defmodule SearchQuery do
     @moduledoc false
@@ -175,8 +175,30 @@ defmodule Riak.Ecto.NormalizedQuery do
   defp escaped_value(expr, params, pk, query, place),
     do: value(expr, params, pk, query, place) |> to_string |> escape_value
 
-  defp field(_expr, _model, _pk, query, place),
-    do: error(query, place)
+  defp field(pk, pk), do: :id
+  defp field(key, _), do: key
+
+  defp field(pk, _, pk), do: "_yz_rk"
+  defp field(key, type, _), do: [Atom.to_string(key), '_', Atom.to_string(type)]
+
+  defp field({{:., _, [{:&, _, [0]}, field]}, _, []}, model, pk, _query, _place) do
+    type = model.__schema__(:type, field) |> riak_type
+    field(field, type, pk)
+  end
+
+  defp field(expr, model, pk, query, place) do
+    error(query, place)
+  end
+
+  defp riak_type(:string),    do: :register
+  defp riak_type(:integer),   do: :register
+  defp riak_type(:float),     do: :register
+  defp riak_type(:binary_id), do: :register
+  defp riak_type(:id),        do: :register
+
+  defp riak_type(:boolean),   do: :flag
+
+  defp riak_type(_),          do: :register
 
   {:ok, pattern} = :re.compile(~S"[:;~^\"!*+\-&\?()\][}{\\\|\s#]", [:unicode])
   @escape_pattern pattern
@@ -254,7 +276,7 @@ defmodule Riak.Ecto.NormalizedQuery do
     end)
   end
 
-  defp pair(_expr, _params, _model, _pk, query, place) do
+  defp pair(expr, params, model, pk, query, place) do
     error(query, place)
   end
 
