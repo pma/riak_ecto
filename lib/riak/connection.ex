@@ -31,19 +31,19 @@ defmodule Riak.Connection do
   end
 
   def fetch_type(pid, bucket_type, bucket, id) do
-    GenServer.call(pid, {:fetch_type, bucket_type, bucket, id})
+    GenServer.call(pid, {:fetch_type, bucket_type, bucket, id}, :infinity)
   end
 
   def update_type(pid, bucket_type, bucket, id, dt) do
-    GenServer.call(pid, {:update_type, bucket_type, bucket, id, dt})
+    GenServer.call(pid, {:update_type, bucket_type, bucket, id, dt}, :infinity)
   end
 
   def search(pid, index, bucket, query, opts) do
-    GenServer.call(pid, {:search, index, bucket, query, opts})
+    GenServer.call(pid, {:search, index, bucket, query, opts}, :infinity)
   end
 
   def delete(pid, bucket_type, bucket, id) do
-    GenServer.call(pid, {:delete, bucket_type, bucket, id})
+    GenServer.call(pid, {:delete, bucket_type, bucket, id}, :infinity)
   end
 
   def handle_call({:fetch_type, bucket_type, bucket, id}, _from, s) do
