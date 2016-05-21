@@ -68,7 +68,7 @@ defmodule Riak.Ecto.Connection do
   def field_name_ecto_to_solr(field, _pk, struct) do
     riak_type =
       case Ecto.Type.type(struct.__schema__(:type, field)) do
-        register when register in [:string, :integer, :float, :decimal, :date, :datetime, :binary_id] ->
+        register when register in [:string, :integer, :float, :decimal, :date, :datetime, :binary_id, :id] ->
           "register"
         :boolean    -> "flag"
         :map        -> "map.*"
