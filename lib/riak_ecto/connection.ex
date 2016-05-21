@@ -10,7 +10,7 @@ defmodule Riak.Ecto.Connection do
   ## Callbacks for adapter
 
   defp bucket(nil, source), do: source
-  defp bucket(prefix, _), do: prefix
+  defp bucket(prefix, _), do: to_string(prefix)
 
   def all(pool, query, opts \\ [])
 
