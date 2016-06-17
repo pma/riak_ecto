@@ -1,5 +1,6 @@
 defmodule Riak.Connection do
   use GenServer
+  require Logger
 
   @spec start_link(Keyword.t) :: GenServer.on_start
   def start_link(opts) do
@@ -34,19 +35,19 @@ defmodule Riak.Connection do
   end
 
   def fetch_type(pid, bucket, id) do
-    GenServer.call(pid, {:fetch_type, bucket, id})
+    GenServer.call(pid, {:fetch_type, bucket, id}, :infinity)
   end
 
   def update_type(pid, bucket, id, dt) do
-    GenServer.call(pid, {:update_type, bucket, id, dt})
+    GenServer.call(pid, {:update_type, bucket, id, dt}, :infinity)
   end
 
   def search(pid, index, query, opts) do
-    GenServer.call(pid, {:search, index, query, opts})
+    GenServer.call(pid, {:search, index, query, opts}, :infinity)
   end
 
   def delete(pid, bucket, id) do
-    GenServer.call(pid, {:delete, bucket, id})
+    GenServer.call(pid, {:delete, bucket, id}, :infinity)
   end
 
   def handle_call({:fetch_type, bucket, id}, _from, s) do
@@ -98,9 +99,10 @@ defmodule Riak.Connection do
           :pong ->
             :timer.send_after(s.heartbeat, self(), :heartbeat)
             {:noreply, s}
-          {:error, _reason} ->
-            :ok = :riakc_pb_socket.stop(s.pid)
-            handle_info(:connect, s)
+          {:error, reason} ->
+            Logger.error("Riak.Connection: Heartbeat error: #{inspect(reason)}")
+            :timer.send_after(s.heartbeat, self(), :heartbeat)
+            {:noreply, s}
         end
       {false, _} ->
         :timer.send_after(s.heartbeat, self(), :heartbeat)
