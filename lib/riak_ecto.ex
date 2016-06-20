@@ -72,6 +72,7 @@ defmodule Riak.Ecto do
   defp load_embed(type, value) do
     Ecto.Type.load(type, for({_, v} <- value, into: [], do: v), fn
       {:embed, _} = type, value -> load_embed(type, value)
+      {:array, _} = type, value -> load_array(type, value)
       type, value -> Ecto.Type.cast(type, value)
     end)
   end
@@ -135,10 +136,11 @@ defmodule Riak.Ecto do
     [pk] = struct.__schema__(:primary_key)
     Ecto.Type.dump(type, value, fn
       {:embed, %Ecto.Embedded{cardinality: :many}} = type, value -> dump_embed(type, value)
-      _type, value -> {:ok, value}
+      {:array, _} = type, value -> dump_list(type, value)
+      type, value -> Ecto.Type.dump(type, value)
     end)
     |> case do
-         {:ok, list} ->
+         {:ok, list} when is_list(list) ->
            {:ok, for(el <- list, into: %{}, do: {Map.fetch!(el, pk), el})}
          other -> other
        end
