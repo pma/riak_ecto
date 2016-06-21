@@ -14,6 +14,6 @@ defmodule Riak.Ecto.Mixfile do
 
   defp deps do
     [{:riakc, github: "basho/riak-erlang-client"},
-     {:ecto, github: "elixir-lang/ecto"}]
+     {:ecto, "~> 2.0"}]
   end
 end
