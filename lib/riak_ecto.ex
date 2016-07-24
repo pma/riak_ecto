@@ -73,7 +73,7 @@ defmodule Riak.Ecto do
     Ecto.Type.load(type, for({_, v} <- value, into: [], do: v), fn
       {:embed, _} = type, value -> load_embed(type, value)
       {:array, _} = type, value -> load_array(type, value)
-      type, value -> Ecto.Type.cast(type, value)
+      type, value -> Ecto.Type.load(type, value)
     end)
   end
 
@@ -84,7 +84,7 @@ defmodule Riak.Ecto do
     |> Enum.sort(fn {idx1, _}, {idx2, _} -> idx1 < idx2 end)
     |> Enum.map(fn {_, v} -> v end)
 
-    Ecto.Type.cast(type, list)
+    Ecto.Type.load(type, list)
   end
 
   defp date_decode(nil), do: {:ok, nil}
