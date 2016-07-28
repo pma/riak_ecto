@@ -70,10 +70,10 @@ defmodule Riak.Ecto do
   def loaders(_, type), do: [type]
 
   defp load_embed(type, value) do
-    Ecto.Type.adapter_load(__MODULE__, type, for({_, v} <- value, into: [], do: v), fn
+    Ecto.Type.load(__MODULE__, type, for({_, v} <- value, into: [], do: v), fn
       {:embed, _} = type, value -> load_embed(type, value)
       {:array, _} = type, value -> load_array(type, value)
-      type, value -> Ecto.Type.adapter_load(__MODULE__, type, value)
+      type, value -> Ecto.Type.load(type, value)
     end)
   end
 
