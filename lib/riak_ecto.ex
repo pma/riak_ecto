@@ -24,9 +24,9 @@ defmodule Riak.Ecto do
       defmodule Pool do
         use Riak.Pool, name: __MODULE__, adapter: unquote(adapter)
 
-#        def log(return, queue_time, query_time, fun, args) do
-#          Riak.Ecto.log(unquote(module), return, queue_time, query_time, fun, args)
-#        end
+        #        def log(return, queue_time, query_time, fun, args) do
+        #          Riak.Ecto.log(unquote(module), return, queue_time, query_time, fun, args)
+        #        end
       end
 
       def __riak_pool__, do: unquote(module).Pool
@@ -63,18 +63,32 @@ defmodule Riak.Ecto do
   def loaders(:float, type), do: [&float_decode/1, type]
   def loaders(:integer, type), do: [&integer_decode/1, type]
   def loaders({:array, _} = type, _), do: [&load_array(type, &1)]
-  def loaders({:embed, %Ecto.Embedded{cardinality: :many}} = type, _), do: [&load_embed(type, &1)]
+  def loaders({:embed, %Ecto.Embedded{cardinality: :many} = embed}, _), do: [&load_embed(embed, &1)]
   def loaders(:binary_id, type), do: [:string, type]
   def loaders(:id, type), do: [&integer_decode/1, type]
 
   def loaders(_, type), do: [type]
 
-  defp load_embed(type, value) do
-    Ecto.Type.load(__MODULE__, type, for({_, v} <- value, into: [], do: v), fn
-      {:embed, _} = type, value -> load_embed(type, value)
-      {:array, _} = type, value -> load_array(type, value)
-      type, value -> Ecto.Type.load(type, value)
-    end)
+  defp load_embed(%{cardinality: :many}, nil), do: {:ok, []}
+
+  defp load_embed(%{cardinality: :many, related: schema, field: field} = embed, value) when is_map(value) do
+    load_embed(embed, for({_, v} <- value, into: [], do: v))
+  end
+
+  defp load_embed(%{cardinality: :many, related: schema, field: field}, value) when is_list(value) do
+    {:ok, Enum.map(value, fn e -> load_embed(field, schema, e, &Ecto.Type.adapter_load(__MODULE__, &1, &2)) end)}
+  end
+
+  defp load_embed(_embed, _value) do
+    :error
+  end
+
+  defp load_embed(_field, schema, value, loader) when is_map(value) do
+    Ecto.Schema.__load__(schema, nil, nil, nil, value, loader)
+  end
+
+  defp load_embed(field, _schema, value, _fun) do
+    raise ArgumentError, "cannot load embed `#{field}`, invalid value: #{inspect value}"
   end
 
   defp load_array(type, value) do
@@ -98,7 +112,8 @@ defmodule Riak.Ecto do
   defp datetime_decode(nil), do: {:ok, nil}
   defp datetime_decode(iso8601) do
     case Ecto.DateTime.cast(iso8601) do
-      {:ok, datetime} -> {:ok, {{datetime.year, datetime.month, datetime.day}, {datetime.hour, datetime.min, datetime.sec, datetime.usec}}}
+      {:ok, datetime} -> {:ok, {{datetime.year, datetime.month, datetime.day},
+                               {datetime.hour, datetime.min, datetime.sec, datetime.usec}}}
       :error          -> :error
     end
   end
@@ -161,10 +176,10 @@ defmodule Riak.Ecto do
     raise ArgumentError, "cannot dump embed `#{field}`, invalid value: #{inspect value}"
   end
 
-  defp dump_list({:array, type}, value) when is_list(value) do
+  defp dump_list({:array, _}, value) when is_list(value) do
     map = value
     |> Stream.with_index
-    |> Stream.map(fn {idx, v} -> {Ecto.Type.adapter_dump(__MODULE__, type, v), to_string(idx)} end)
+    |> Stream.map(fn {idx, v} -> {to_string(v), to_string(idx)} end)
     |> Enum.into(%{})
 
     {:ok, map}
