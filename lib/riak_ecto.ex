@@ -70,10 +70,10 @@ defmodule Riak.Ecto do
   def loaders(_, type), do: [type]
 
   defp load_embed(type, value) do
-    Ecto.Type.load(type, for({_, v} <- value, into: [], do: v), fn
+    Ecto.Type.adapter_load(__MODULE__, type, for({_, v} <- value, into: [], do: v), fn
       {:embed, _} = type, value -> load_embed(type, value)
       {:array, _} = type, value -> load_array(type, value)
-      type, value -> Ecto.Type.load(type, value)
+      type, value -> Ecto.Type.adapter_load(__MODULE__, type, value)
     end)
   end
 
@@ -126,30 +126,45 @@ defmodule Riak.Ecto do
   def dumpers(:date, type), do: [type, &register_encode/1]
   def dumpers(:datetime, type), do: [type, &register_encode/1]
 
-  def dumpers({:embed, %Ecto.Embedded{cardinality: :many}} = type, _), do: [&dump_embed(type, &1)]
+  def dumpers({:embed, %Ecto.Embedded{cardinality: :many} = embed}, _), do: [&dump_embed(embed, &1)]
   def dumpers({:array, _} = type, _), do: [&dump_list(type, &1)]
   def dumpers(:binary_id, type), do: [type, :string]
   def dumpers(:id, type), do: [type, &register_encode/1]
   def dumpers(_, type), do: [type]
 
-  defp dump_embed({:embed, %Ecto.Embedded{cardinality: :many, related: struct}} = type, value) do
-    [pk] = struct.__schema__(:primary_key)
-    Ecto.Type.dump(type, value, fn
-      {:embed, %Ecto.Embedded{cardinality: :many}} = type, value -> dump_embed(type, value)
-      {:array, _} = type, value -> dump_list(type, value)
-      type, value -> Ecto.Type.dump(type, value)
+  defp dump_embed(%{cardinality: :many, related: schema, field: field}, value) when is_list(value) do
+    [pk] = schema.__schema__(:primary_key)
+    types = schema.__schema__(:types)
+    list = Enum.map(value, fn e ->
+      dump_embed(field, schema, e, types, &Ecto.Type.adapter_dump(__MODULE__, &1, &2))
     end)
-    |> case do
-         {:ok, list} when is_list(list) ->
-           {:ok, for(el <- list, into: %{}, do: {Map.fetch!(el, pk), el})}
-         other -> other
-       end
+    case list do
+      [] -> {:ok, []}
+      [_e | _] -> {:ok, for(e <- list, into: %{}, do: {e[pk], e})}
+    end
   end
 
-  defp dump_list({:array, _}, value) when is_list(value) do
+  defp dump_embed(_field, schema, %{__struct__: schema} = struct, types, dumper) do
+    Enum.reduce(types, %{}, fn {field, type}, acc ->
+      value = Map.get(struct, field)
+      require Logger
+      Logger.warn inspect({type, value})
+
+      case dumper.(type, value) do
+        {:ok, value} -> Map.put(acc, field, value)
+        :error       -> raise ArgumentError, "cannot dump `#{inspect value}` as type #{inspect type}"
+      end
+    end)
+  end
+
+  defp dump_embed(field, _schema, value, _types, _fun) do
+    raise ArgumentError, "cannot dump embed `#{field}`, invalid value: #{inspect value}"
+  end
+
+  defp dump_list({:array, type}, value) when is_list(value) do
     map = value
     |> Stream.with_index
-    |> Stream.map(fn {idx, v} -> {to_string(v), to_string(idx)} end)
+    |> Stream.map(fn {idx, v} -> {Ecto.Type.adapter_dump(__MODULE__, type, v), to_string(idx)} end)
     |> Enum.into(%{})
 
     {:ok, map}
