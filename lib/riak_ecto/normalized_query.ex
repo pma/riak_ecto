@@ -107,7 +107,7 @@ defmodule Riak.Ecto.NormalizedQuery do
   defp filter(%Query{wheres: wheres} = query, params, {_coll, model, pk}) do
     search =
       wheres
-      |> Enum.map(fn %Query.QueryExpr{expr: expr} ->
+      |> Enum.map(fn %Query.BooleanExpr{expr: expr} ->
         pair(expr, params, model, pk, query, "where clause")
       end)
       |> Enum.intersperse([" AND "])
@@ -175,8 +175,8 @@ defmodule Riak.Ecto.NormalizedQuery do
   defp escaped_value(expr, params, pk, query, place),
     do: value(expr, params, pk, query, place) |> to_string |> escape_value
 
-  defp field(pk, pk), do: :id
-  defp field(key, _), do: key
+#  defp field(key, pk) when key == pk, do: :id
+#  defp field(key, _), do: key
 
   defp field(pk, _, pk), do: "_yz_rk"
   defp field(key, type, _), do: [Atom.to_string(key), '_', Atom.to_string(type)]
@@ -186,7 +186,7 @@ defmodule Riak.Ecto.NormalizedQuery do
     field(field, type, pk)
   end
 
-  defp field(expr, model, pk, query, place) do
+  defp field(_expr, _model, _pk, query, place) do
     error(query, place)
   end
 
@@ -276,7 +276,7 @@ defmodule Riak.Ecto.NormalizedQuery do
     end)
   end
 
-  defp pair(expr, params, model, pk, query, place) do
+  defp pair(_expr, _params, _model, _pk, query, place) do
     error(query, place)
   end
 

@@ -42,9 +42,6 @@ defmodule Riak.Ecto.Encoder do
   def encode(%Riak.Ecto.Counter{value: value, increment: increment}, _pk) do
     {:ok, {:counter, value, increment}}
   end
-  def encode(%Riak.Ecto.Set{} = set, _pk) do
-    {:ok, {:set, Enum.into(set, [])}}
-  end
   def encode(%{__struct__: change, field: field, value: value}, pk)
   when change in [Riak.Ecto.ChangeMap, Riak.Ecto.ChangeArray] do
     case encode(value, pk) do

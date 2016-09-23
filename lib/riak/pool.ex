@@ -78,8 +78,8 @@ defmodule Riak.Pool do
 #  defcallback log(return, queue_time, query_time, fun :: atom, args :: list) ::
 #    return when return: var, queue_time: time, query_time: time
 
-  def run_with_log(pool, log, args, opts, fun) do
-    {log?, opts} = Keyword.pop(opts, :log, true)
+  def run_with_log(pool, _log, _args, opts, fun) do
+    {log?, _opts} = Keyword.pop(opts, :log, true)
 
     if log? do
       {queue_time, {query_time, value}} =

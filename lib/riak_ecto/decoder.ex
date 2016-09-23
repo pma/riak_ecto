@@ -21,9 +21,6 @@ defmodule Riak.Ecto.Decoder do
   def decode_value({:counter, value}, _pk) when is_integer(value),
     do: %Riak.Ecto.Counter{value: value, increment: :undefined}
 
-  def decode_value({:set, value}, _pk) when is_list(value),
-    do: Enum.into(value, Riak.Ecto.Set.new)
-
   def decode_value(map, pk) when is_map(map),
     do: decode_document(map, pk)
 end

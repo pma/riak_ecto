@@ -45,8 +45,12 @@ defmodule Riak.Ecto do
     repo.__riak_pool__.start_link(opts)
   end
 
+  def ensure_all_started(repo, _type) do
+    start_link(repo, [])
+  end
+
   def child_spec(repo, opts) do
-    Supervisor.Spec.worker(__MODULE__, [repo,opts], [])
+    Supervisor.Spec.worker(__MODULE__, [repo, opts], [])
   end
 
   @doc false
@@ -60,6 +64,7 @@ defmodule Riak.Ecto do
   @doc false
   def loaders(:date, type), do: [&date_decode/1, type]
   def loaders(:datetime, type), do: [&datetime_decode/1, type]
+  def loaders(:utc_datetime, type), do: [&datetime_decode/1, type]
   def loaders(:float, type), do: [&float_decode/1, type]
   def loaders(:integer, type), do: [&integer_decode/1, type]
   def loaders({:array, _} = type, _), do: [&load_array(type, &1)]
@@ -71,7 +76,7 @@ defmodule Riak.Ecto do
 
   defp load_embed(%{cardinality: :many}, nil), do: {:ok, []}
 
-  defp load_embed(%{cardinality: :many, related: schema, field: field} = embed, value) when is_map(value) do
+  defp load_embed(%{cardinality: :many, related: _schema, field: _field} = embed, value) when is_map(value) do
     load_embed(embed, for({_, v} <- value, into: [], do: v))
   end
 
@@ -140,6 +145,7 @@ defmodule Riak.Ecto do
   def dumpers(:float, type), do: [type, &register_encode/1]
   def dumpers(:date, type), do: [type, &register_encode/1]
   def dumpers(:datetime, type), do: [type, &register_encode/1]
+  def dumpers(:utc_datetime, type), do: [type, &register_encode/1]
 
   def dumpers({:embed, %Ecto.Embedded{cardinality: :many} = embed}, _), do: [&dump_embed(embed, &1)]
   def dumpers({:array, _} = type, _), do: [&dump_list(type, &1)]
@@ -225,7 +231,7 @@ defmodule Riak.Ecto do
   end
 
   @doc false
-  def insert(repo, %{source: {prefix, source}}, fields, _returning, options) do
+  def insert(repo, %{source: {prefix, source}}, fields, _on_conflict, _returning, options) do
     Connection.insert(repo.__riak_pool__, prefix, source, fields, options)
   end
 
@@ -259,7 +265,7 @@ defmodule Riak.Ecto do
       "Riak adapter only supports deleting by id."
   end
 
-  def insert_all(_, _, _, _, _, _) do
+  def insert_all(_, _, _, _, _, _, _) do
     raise ArgumentError,
       "Riak adapter does not support insert_all."
   end

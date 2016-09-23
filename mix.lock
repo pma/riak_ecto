@@ -1,8 +1,8 @@
 %{"decimal": {:hex, :decimal, "1.1.2", "79a769d4657b2d537b51ef3c02d29ab7141d2b486b516c109642d453ee08e00c", [:mix], []},
-  "ecto": {:hex, :ecto, "2.0.2", "b02331c1f20bbe944dbd33c8ecd8f1ccffecc02e344c4471a891baf3a25f5406", [:mix], [{:poison, "~> 1.5 or ~> 2.0", [hex: :poison, optional: true]}, {:sbroker, "~> 1.0-beta", [hex: :sbroker, optional: true]}, {:mariaex, "~> 0.7.7", [hex: :mariaex, optional: true]}, {:postgrex, "~> 0.11.2", [hex: :postgrex, optional: true]}, {:db_connection, "~> 1.0-rc.2", [hex: :db_connection, optional: true]}, {:decimal, "~> 1.0", [hex: :decimal, optional: false]}, {:poolboy, "~> 1.5", [hex: :poolboy, optional: false]}]},
+  "ecto": {:hex, :ecto, "2.1.0-rc.0", "c25bef5ef7c039d5a25e32dd27ef0fa21ac4f38352631f9bc03df96c2ba84070", [:mix], [{:db_connection, "~> 1.0-rc.4", [hex: :db_connection, optional: true]}, {:decimal, "~> 1.1.2 or ~> 1.2", [hex: :decimal, optional: false]}, {:mariaex, "~> 0.7.7", [hex: :mariaex, optional: true]}, {:poison, "~> 2.2", [hex: :poison, optional: true]}, {:poolboy, "~> 1.5", [hex: :poolboy, optional: false]}, {:postgrex, "~> 0.12.0", [hex: :postgrex, optional: true]}, {:sbroker, "~> 1.0-beta", [hex: :sbroker, optional: true]}]},
   "hamcrest": {:git, "https://github.com/basho/hamcrest-erlang.git", "98bc7aa19ea081478c816824aa05fc5a48acae66", [tag: "0.3.0-basho"]},
   "meck": {:git, "https://github.com/basho/meck.git", "dde759050eff19a1a80fd854d7375174b191665d", [tag: "0.8.2"]},
   "poolboy": {:hex, :poolboy, "1.5.1", "6b46163901cfd0a1b43d692657ed9d7e599853b3b21b95ae5ae0a777cf9b6ca8", [:rebar], []},
-  "protobuffs": {:git, "https://github.com/basho/erlang_protobuffs.git", "0d22220a8e56adab129836d6ff582a9bca103a0c", [tag: "0.8.4"]},
-  "riak_pb": {:git, "https://github.com/basho/riak_pb", "9ca2395f9d6464b82bab466bbdca410cb85a0ac7", [tag: "2.1.4.1"]},
-  "riakc": {:git, "https://github.com/basho/riak-erlang-client.git", "261df630afe4a998e099a8ab209a2dc7419f85de", []}}
+  "protobuffs": {:git, "https://github.com/basho/erlang_protobuffs.git", "0dde9d3b37b7bec3a4dfb0e87684dd7039e169ab", [tag: "0.9.0"]},
+  "riak_pb": {:git, "git://github.com/basho/riak_pb", "f5af9ffe04eb27689d483509de26574bdf70343f", [branch: "develop-2.2"]},
+  "riakc": {:git, "https://github.com/basho/riak-erlang-client.git", "960cc6669b6c98e63b7f2fa8e0f596eac660d084", []}}
