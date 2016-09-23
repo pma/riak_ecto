@@ -29,7 +29,6 @@ defmodule Riak.Ecto.NormalizedQuery do
   end
 
   def all(%Query{} = original, params) do
-
     check_query(original)
 
     from   = from(original)
@@ -94,12 +93,12 @@ defmodule Riak.Ecto.NormalizedQuery do
   defp start(%Query{offset: offset} = query, params, pk), do: offset_limit(offset, query, params, pk)
   defp rows(%Query{limit: limit} = query, params, pk), do: offset_limit(limit, query, params, pk)
 
-  defp filter(%Query{wheres: [%Query.QueryExpr{expr: {:==, _, [{{:., _, [{:&, _, [0]}, pk]}, _, []},
+  defp filter(%Query{wheres: [%Query.BooleanExpr{expr: {:==, _, [{{:., _, [{:&, _, [0]}, pk]}, _, []},
                                                                right]}}]} = query, params, {_coll, _model, pk}) do
     {:fetch, value(right, params, pk, query, "where clause")}
   end
 
-  defp filter(%Query{wheres: [%Query.QueryExpr{expr: {:in, _, [{{:., _, [{:&, _, [0|_]}, pk]}, _, []},
+  defp filter(%Query{wheres: [%Query.BooleanExpr{expr: {:in, _, [{{:., _, [{:&, _, [0|_]}, pk]}, _, []},
                                                                right]}}]} = query, params, {_coll, _model, pk}) do
     {:fetch, value(right, params, pk, query, "where clause")}
   end
