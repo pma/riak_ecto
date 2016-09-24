@@ -168,8 +168,6 @@ defmodule Riak.Ecto do
   defp dump_embed(_field, schema, %{__struct__: schema} = struct, types, dumper) do
     Enum.reduce(types, %{}, fn {field, type}, acc ->
       value = Map.get(struct, field)
-      require Logger
-      Logger.warn inspect({type, value})
 
       case dumper.(type, value) do
         {:ok, value} -> Map.put(acc, field, value)
