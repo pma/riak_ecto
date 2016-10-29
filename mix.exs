@@ -13,7 +13,7 @@ defmodule Riak.Ecto.Mixfile do
   end
 
   defp deps do
-    [{:riakc, github: "basho/riak-erlang-client"},
+    [{:riakc, "~> 2.4"},
      {:ecto, "~> 2.1-rc"}]
   end
 end
