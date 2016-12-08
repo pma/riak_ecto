@@ -5,7 +5,7 @@ defmodule Riak.Ecto.Mixfile do
     [app: :riak_ecto,
      version: "0.2.0",
      elixir: "~> 1.2",
-     deps: deps]
+     deps: deps()]
   end
 
   def application do

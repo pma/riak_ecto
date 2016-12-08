@@ -28,8 +28,6 @@ defmodule Riak.Pool do
 
   """
 
-  use Behaviour
-
   @type t :: module
 
   @doc false
@@ -74,7 +72,7 @@ defmodule Riak.Pool do
 
   @type time :: integer
 
-  defcallback run((pid -> return)) :: {queue_time :: time, return} when return: var
+  @callback run((pid -> return)) :: {queue_time :: time, return} when return: var
 #  defcallback log(return, queue_time, query_time, fun :: atom, args :: list) ::
 #    return when return: var, queue_time: time, query_time: time
 
@@ -82,7 +80,7 @@ defmodule Riak.Pool do
     {log?, _opts} = Keyword.pop(opts, :log, true)
 
     if log? do
-      {queue_time, {query_time, value}} =
+      {_queue_time, {_query_time, value}} =
         pool.run(&:timer.tc(fun, [&1]))
 
  #     pool.log(value, queue_time, query_time, log, args ++ [opts])

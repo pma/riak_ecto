@@ -84,11 +84,11 @@ defmodule Riak.Ecto.Connection do
 
   defp crdt_to_map(values) do
     Enum.reduce(values, %{}, fn
-      {{k, :register}, v}, m -> Dict.put(m, k, v)
-      {{k, :map}, v}, m      -> Dict.put(m, k, crdt_to_map((v)))
-      {{k, :flag}, v}, m     -> Dict.put(m, k, v)
-      {{k, :counter}, v}, m  -> Dict.put(m, k, {:counter, v})
-      {{k, :set}, v}, m      -> Dict.put(m, k, {:set, v})
+      {{k, :register}, v}, m -> Map.put(m, k, v)
+      {{k, :map}, v}, m      -> Map.put(m, k, crdt_to_map((v)))
+      {{k, :flag}, v}, m     -> Map.put(m, k, v)
+      {{k, :counter}, v}, m  -> Map.put(m, k, {:counter, v})
+      {{k, :set}, v}, m      -> Map.put(m, k, {:set, v})
     end)
   end
 
@@ -96,7 +96,7 @@ defmodule Riak.Ecto.Connection do
   defp solr_to_map({_, fields}) do
     Enum.reduce(fields, %{}, fn
       {field, _}, map when field in @ignore_fields -> map
-      {"_yz_rk", value}, map                       -> Dict.put(map, "id", value)
+      {"_yz_rk", value}, map                       -> Map.put(map, "id", value)
       {key, value}, map                            -> map_solr_field(key, value, map)
     end)
   end
@@ -110,10 +110,10 @@ defmodule Riak.Ecto.Connection do
 
   defp map_solr_field_value(key, value, key_rest, map) do
     case Regex.scan(~r/(.*)_(map|register|counter|flag|set)/r, key, capture: :all_but_first) do
-      [[field, "register"]] -> Dict.put(map, field, value)
-      [[field, "flag"]]     -> Dict.put(map, field, value == "true")
-      [[field, "counter"]]  -> Dict.put(map, field, {:counter, String.to_integer(value)})
-      [[field, "map"]]      -> Dict.update(Dict.put_new(map, field, %{}), field, %{}, &map_solr_field(key_rest, value, &1))
+      [[field, "register"]] -> Map.put(map, field, value)
+      [[field, "flag"]]     -> Map.put(map, field, value == "true")
+      [[field, "counter"]]  -> Map.put(map, field, {:counter, String.to_integer(value)})
+      [[field, "map"]]      -> Map.update(Map.put_new(map, field, %{}), field, %{}, &map_solr_field(key_rest, value, &1))
       _                     -> map
     end
   end

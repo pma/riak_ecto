@@ -14,7 +14,6 @@ defmodule Riak.Ecto.Utils do
     encode(i)
   end
 
-  @base 62
   @dlen 64
   alphabet = Enum.with_index '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
 

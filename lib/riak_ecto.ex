@@ -268,6 +268,18 @@ defmodule Riak.Ecto do
       "Riak adapter does not support insert_all."
   end
 
+  def in_transaction?(_) do
+    raise "Not implemented"
+  end
+
+  def rollback(_, _) do
+    raise "Not implemented"
+  end
+
+  def transaction(_, _, _) do
+    raise "Not implemented"
+  end
+
   def process_document({context, document}, %{projection: projection, pk: _pk}, process) do
     Enum.map(projection, &process.(&1, document, context))
   end
