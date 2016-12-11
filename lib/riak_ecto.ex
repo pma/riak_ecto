@@ -107,10 +107,22 @@ defmodule Riak.Ecto do
   end
 
   defp date_decode(nil), do: {:ok, nil}
-  defp date_decode(iso8601), do: Ecto.Type.cast(:date, iso8601)
+  defp date_decode(iso8601) do
+    with {:ok, date} <- Ecto.Date.cast(iso8601) do
+      Ecto.Date.to_erl(date)
+    else
+      error -> error
+    end
+  end
 
   defp datetime_decode(nil), do: {:ok, nil}
-  defp datetime_decode(iso8601), do: Ecto.Type.cast(:utc_datetime, iso8601)
+  defp datetime_decode(iso8601) do
+    with {:ok, datetime} <- Ecto.DateTime.cast(iso8601) do
+      {:ok, Ecto.DateTime.to_erl(datetime)}
+    else
+      error -> error
+    end
+  end
 
   defp float_decode(nil), do: {:ok, nil}
   defp float_decode(string) do
