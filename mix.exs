@@ -14,6 +14,6 @@ defmodule Riak.Ecto.Mixfile do
 
   defp deps do
     [{:riakc, "~> 2.4"},
-     {:ecto, "~> 2.1-rc"}]
+     {:ecto, "~> 2.1"}]
   end
 end
