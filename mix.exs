@@ -9,7 +9,7 @@ defmodule Riak.Ecto.Mixfile do
   end
 
   def application do
-    [applications: [:riakc, :ecto]]
+    [applications: [:hamcrest, :riakc, :ecto]]
   end
 
   defp deps do
