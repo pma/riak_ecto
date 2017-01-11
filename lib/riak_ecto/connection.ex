@@ -71,7 +71,7 @@ defmodule Riak.Ecto.Connection do
         register when register in [:string, :integer, :float, :decimal,
                                    :date, :datetime,
                                    :naive_datetime, :utc_datetime,
-                                   :binary_id, :id] ->
+                                   :binary_id, :id, :any] ->
           "register"
         :boolean    -> "flag"
         :map        -> "map.*"
