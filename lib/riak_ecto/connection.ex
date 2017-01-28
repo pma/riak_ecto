@@ -109,7 +109,7 @@ defmodule Riak.Ecto.Connection do
   end
 
   defp map_solr_field_value(key, value, key_rest, map) do
-    case Regex.scan(~r/(.*)_(map|register|counter|flag|set)/r, key, capture: :all_but_first) do
+    case Regex.scan(~r/(.*)_(map|register|counter|flag|set)/U, key, capture: :all_but_first) do
       [[field, "register"]] -> Map.put(map, field, value)
       [[field, "flag"]]     -> Map.put(map, field, value == "true")
       [[field, "counter"]]  -> Map.put(map, field, {:counter, String.to_integer(value)})
