@@ -34,7 +34,7 @@ defmodule Riak.Pool.Poolboy do
   end
 
   def do_run(pool, fun, retry_count) do
-    {queue_time, pid} = :timer.tc(:poolboy, :checkout, [pool])
+    {queue_time, pid} = :timer.tc(:poolboy, :checkout, [pool, true, :infinity])
     ret =
       try do
         fun.(pid)

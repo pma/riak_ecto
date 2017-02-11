@@ -68,7 +68,7 @@ defmodule Riak.Connection do
   end
 
   def handle_call({:delete, bucket_type, bucket, id}, _from, s) do
-    case :riakc_pb_socket.delete(s.pid, {bucket_type, bucket}, id) do
+    case :riakc_pb_socket.delete(s.pid, {bucket_type, bucket}, id, []) do
       :ok              -> {:reply, :ok, s}
       {:error, reason} -> {:reply, {:error, reason}, s}
     end
