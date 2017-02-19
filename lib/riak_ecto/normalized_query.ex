@@ -265,6 +265,10 @@ defmodule Riak.Ecto.NormalizedQuery do
     [field(left, model, pk, query, place), ':', to_string(value(right, params, pk, query, place))]
   end
 
+  defp pair({:is_nil, _, [expr]}, _params, model, pk, query, place) do
+    ["(-", field(expr, model, pk, query, place), ":[* TO *] AND *:*)"]
+  end
+
   # embedded fragment
   defp pair({:fragment, _, args}, params, _model, pk, query, place) when is_list(args) do
     Enum.map(args, fn arg ->
