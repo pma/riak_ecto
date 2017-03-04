@@ -42,9 +42,7 @@ defmodule Riak.Ecto.Connection do
     order       = query.order
     query       = query.normal_query
 
-    fl = fields
-    |> Stream.map(&field_name_ecto_to_solr(&1, pk, struct))
-    |> Enum.join(" ")
+    fl = Enum.map(fields, &field_name_ecto_to_solr(&1, pk, struct))
 
     opts = [filter: filter, sort: order, fl: fl] ++ opts
 
